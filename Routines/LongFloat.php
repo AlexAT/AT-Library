@@ -410,5 +410,26 @@ class LongFloat
         if (($multiplier = ($this::$multipliers[$decimals] ?? null)) !== null) return $multiplier;
         $this::$halfMultipliers[$decimals] = gmp_div(gmp_pow(10, $decimals), 2, GMP_ROUND_ZERO); # initialize new half multiplier
         return $this::$multipliers[$decimals] = gmp_pow(10, $decimals); # initialize new decimal multiplier
-   }
+    }
+   
+    public function __debugInfo()
+    {
+        $out = [
+            'value' => $this->asString(),
+            'gmp' => gmp_strval($this->gmp, 10),
+            'decimals' => $this->decimals,
+            'maxDecimals' => $this->maxDecimals,
+            'rounding' => $this->rounding,
+        ];
+
+        switch ($this->rounding) {
+            case $this::ROUND_MATH: $out['rounding'] = 'math (half)'; break;
+            case $this::ROUND_TRUNC: $out['rounding'] = 'truncate (to zero)'; break;
+            case $this::ROUND_FLOOR: $out['rounding'] = 'floor (down)'; break;
+            case $this::ROUND_CEIL: $out['rounding'] = 'ceil (up)'; break;
+            case $this::ROUND_SPREAD: $out['rounding'] = 'spread (from zero)'; break;
+        }
+
+        return $out;
+    }
 }
