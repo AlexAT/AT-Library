@@ -1,0 +1,7 @@
+Additional AI usage restrictions are hereby applied to all 3-BSD licensed source code authored by Alex/AT.
+
+- AT/Library code can be put into AI for analysis/scrutiny, for purposes of maintaining code quality.
+- AT/Library code cannot be used for training AI models or be rewritten using it as base for AI models.
+- AT/Library code cannot be updated or developed using AI models as AT/Library code source.
+- All restrictions above do not apply to any other projects reusing AT/Library code, but AT/Library code bits reused directly must follow the restriction.
+- All AT/Library distributions (including any projects reusing AT/Library as base) need to retain this restriction list inside AT/Library folder.
