@@ -138,7 +138,7 @@ class LongFloat
                 $this->numerator = gmp_add($this->numerator, gmp_mul($this->denominator, $arg));
                 return $this;
             } else {
-                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding); # convert to our own type
+                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand); # convert to our own type
             }
         }
         
@@ -158,7 +158,7 @@ class LongFloat
                 $this->numerator = gmp_sub($this->numerator, gmp_mul($this->denominator, $arg));
                 return $this;
             } else {
-                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding); # convert to our own type
+                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand); # convert to our own type
             }
         }
         
@@ -178,7 +178,7 @@ class LongFloat
                 $this->numerator = gmp_sub(gmp_mul($this->denominator, $arg), $this->numerator);
                 return $this;
             } else {
-                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding); # convert to our own type
+                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand); # convert to our own type
             }
         }
         
@@ -197,7 +197,7 @@ class LongFloat
                 $this->numerator = gmp_mul($this->numerator, $arg);
                 return $this;
             } else {
-                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding); # convert to our own type
+                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand); # convert to our own type
             }
         }
 
@@ -221,15 +221,17 @@ class LongFloat
                 $this->denominator = gmp_mul($this->denominator, $arg);
                 return $this;
             } else {
-                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding); # convert to our own type
+                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand); # convert to our own type
             }
         }
 
         if (!gmp_sign($arg->numerator)) throw new \RangeException("Division by zero"); # check for zero
 
         # when we divide two numbers, we just cross-multiply our numerator by remote denominator as new numerator and our denominator by remote numerator as new denominator
+        # take care we need to store $arg->numerator as $arg can be us ourselves and so we can destroy it in the process
+        $argNumerator = $arg->numerator;
         $this->numerator = gmp_mul($this->numerator, $arg->denominator);
-        $this->denominator = gmp_mul($this->denominator, $arg->numerator);
+        $this->denominator = gmp_mul($this->denominator, $argNumerator);
         if (gmp_sign($this->denominator) < 0) {
             # invert signs so denominator is positive
             $this->numerator = gmp_neg($this->numerator);
@@ -243,17 +245,20 @@ class LongFloat
         if (!gmp_sign($this->numerator)) throw new \RangeException("Division by zero");
         
         if (!$arg instanceof LongFloat) {
-            # integer handling is easy, we just multiply our numerator and that is it
+            # integer handling is easy, we swap our numerator and denominator and then multiply the numerator
+            # for case of us ourselves, we do not need to store anything as oldDenominator is already stored
             if (is_integer($arg) || ($arg instanceof \GMP)) {
-                $this->numerator = gmp_mul($newNumerator, $arg);
-                return $this->autoRounding ? $this->round() : $this;
+                $oldDenominator = $this->denominator;
+                $this->denominator = $this->numerator;
+                $this->numerator = gmp_mul($oldDenominator, $arg);
+                return $this;
             } else {
-                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding); # convert to our own type
+                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand); # convert to our own type
             }
         }
         
         # for reverse division, we just cross-multiply our denominator by remote numerator as new numerator and our numerator by remote denominator as new denumerator
-        # this requires saving old numerator during the operation
+        # this requires saving old numerator during the operation, here we do not need to store anything else for case of us ourselves as oldNumerator is already stored
         $oldNumerator = $this->numerator;
         $this->numerator = gmp_mul($this->denominator, $arg->numerator);
         $this->denominator = gmp_mul($oldNumerator, $arg->denominator);
@@ -288,7 +293,7 @@ class LongFloat
             if (($decimals === null) && ($rounding === null) && (is_integer($arg) || ($arg instanceof \GMP))) {
                 return gmp_cmp($this->numerator, gmp_mul($arg, $this->denominator));
             } else {
-                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding); # convert to our own type
+                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand); # convert to our own type
             }
         }
         
@@ -312,7 +317,7 @@ class LongFloat
             if (($decimals === null) && ($rounding === null) && (is_integer($arg) || ($arg instanceof \GMP))) {
                 return gmp_cmp(gmp_mul($arg, $this->denominator), $this->numerator);
             } else {
-                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding); # convert to our own type
+                $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand); # convert to our own type
             }
         }
         
@@ -338,7 +343,7 @@ class LongFloat
                     $numerator = $arg; 
                     $denominator = 1;
                 } else {
-                    $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding);
+                    $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand);
                 }
             }
         
@@ -418,7 +423,7 @@ class LongFloat
                     $numerator = $arg; 
                     $denominator = 1;
                 } else {
-                    $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding);
+                    $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand);
                 }
             }
         
@@ -573,6 +578,40 @@ class LongFloat
     public function __toString()
     {
         return $this->toString();
+    }
+    
+    public function pi()
+    {
+        # PI calculation (Gauss-Legendre) with current max decimals
+        $decimals = $this->maxDecimals * 2; # do twice as much to prevent rounding errors
+        $a = new $this(1, $decimals, $this::ROUND_MATH, false, true);
+        $b = (new $this(2, $decimals, $this::ROUND_MATH, false, true))->sqrt()->divRev(1);
+        $t = new $this("0.25", $decimals, $this::ROUND_MATH, false, true);
+        $p = new $this(1, $decimals, $this::ROUND_MATH, false, true);
+
+        $loops = ceil(log($decimals, 2));
+        for ($i = 0; $i < $loops; $i++) {
+            # aPrev = a
+            $aPrev = clone $a;
+
+            # a = (a + b) / 2
+            $a->add($b)->div(2);
+
+            # b = sqrt(aPrev * b);
+            $b->mul($aPrev)->sqrt();
+            
+            # t = t - (p * ((aPrev - a) ^ 2))
+            $t->sub($aPrev->sub($a)->mul($aPrev)->mul($p));
+            
+            # p = p * 2
+            $p->mul(2);
+        }
+        
+        # approximate PI as (a + b)^2 / (t * 4)
+        $a->add($b)->mul($a)->div($t->mul(4));
+        
+        # round and applaud
+        return $this->set($a)->round();
     }
     
     # this one gets rounded numerator value for specific decimal precision and rounding
