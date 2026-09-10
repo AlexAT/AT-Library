@@ -337,8 +337,7 @@ class LongFloat
         if (!is_integer($arg)) {
             if (!$arg instanceof LongFloat) {
                 # integer handling is easy, we just take powers of both our numerator and denominator and that is it, the slightly separate handling here is because we need to check for zero and sign
-                if (is_integer($arg)) {
-                } elseif ($arg instanceof \GMP) {
+                if ($arg instanceof \GMP) {
                     # provide integer GMP argument directly as numerator with denominator 1
                     $numerator = $arg; 
                     $denominator = 1;
@@ -348,15 +347,9 @@ class LongFloat
             }
         
             if ($arg instanceof LongFloat) {
-                # compand argument and provide numerator and denominator from the companding result
-                $gcd = gmp_gcd($arg->numerator, $arg->denominator);
-                if (gmp_cmp($gcd, 1) > 0) {
-                    $numerator = gmp_div($arg->numerator, $gcd);
-                    $denominator = gmp_div($arg->denominator, $gcd);
-                } else {
-                    $numerator = $arg->numerator;
-                    $denominator = $arg->denominator;
-                }
+                # provide numerator and denominator from the argument
+                $numerator = $arg->numerator;
+                $denominator = $arg->denominator;
             }
 
             # taking fractional powers is possible but tricky (argument denominator level root of value in argument numerator power)
@@ -416,9 +409,7 @@ class LongFloat
     {
         if (!is_integer($arg)) {
             if (!$arg instanceof LongFloat) {
-                # integer handling is easy, we just take powers of both our numerator and denominator and that is it, the slightly separate handling here is because we need to check for zero and sign
-                if (is_integer($arg)) {
-                } elseif ($arg instanceof \GMP) {
+                if ($arg instanceof \GMP) {
                     # provide integer GMP argument directly as numerator with denominator 1
                     $numerator = $arg; 
                     $denominator = 1;
@@ -428,15 +419,9 @@ class LongFloat
             }
         
             if ($arg instanceof LongFloat) {
-                # compand argument and provide numerator and denominator from the companding result
-                $gcd = gmp_gcd($arg->numerator, $arg->denominator);
-                if (gmp_cmp($gcd, 1) > 0) {
-                    $numerator = gmp_div($arg->numerator, $gcd);
-                    $denominator = gmp_div($arg->denominator, $gcd);
-                } else {
-                    $numerator = $arg->numerator;
-                    $denominator = $arg->denominator;
-                }
+                # provide numerator and denominator from the argument
+                $numerator = $arg->numerator;
+                $denominator = $arg->denominator;
             }
 
             # taking fractional power roots is possible but tricky (argument numerator level root of value in argument denominator power)
@@ -543,8 +528,8 @@ class LongFloat
         # compand us by the greatest common integer denominator of numerator and denominator, if any >1, to prevent overgrowth
         $gcd = gmp_gcd($this->numerator, $this->denominator);
         if (gmp_cmp($gcd, 1) > 0) {
-            $this->numerator = gmp_div($this->numerator, $gcd);
-            $this->denominator = gmp_div($this->denominator, $gcd);
+            $this->numerator = gmp_div($this->numerator, $gcd, GMP_ROUND_ZERO);
+            $this->denominator = gmp_div($this->denominator, $gcd, GMP_ROUND_ZERO);
         }
         return $this;
     }
