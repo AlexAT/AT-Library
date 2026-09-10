@@ -528,6 +528,7 @@ class LongFloat
    
     public function compand()
     {
+        # saves us gcd, cmp and two divs in quite not an improbable case we are zero
         if (!gmp_sign($this->numerator)) {
             # clear the denominator in case we are zero
             $this->denominator = 1;
