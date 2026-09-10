@@ -591,23 +591,14 @@ class LongFloat
 
         $loops = ceil(log($decimals, 2));
         for ($i = 0; $i < $loops; $i++) {
-            # aPrev = a
-            $aPrev = clone $a;
-
-            # a = (a + b) / 2
-            $a->add($b)->div(2);
-
-            # b = sqrt(aPrev * b);
-            $b->mul($aPrev)->sqrt();
-            
-            # t = t - (p * ((aPrev - a) ^ 2))
-            $t->sub($aPrev->sub($a)->mul($aPrev)->mul($p));
-            
-            # p = p * 2
-            $p->mul(2);
+            $aPrev = clone $a; # aPrev = a
+            $a->add($b)->div(2); # a = (a + b) / 2
+            $b->mul($aPrev)->sqrt(); # b = sqrt(aPrev * b);
+            $t->sub($aPrev->sub($a)->mul($aPrev)->mul($p)); # t = t - (p * ((aPrev - a) ^ 2))
+            $p->mul(2); # p = p * 2
         }
         
-        # approximate PI as (a + b)^2 / (t * 4)
+        # approximate PI as (a + b) ^ 2 / (t * 4)
         $a->add($b)->mul($a)->div($t->mul(4));
         
         # round and applaud
