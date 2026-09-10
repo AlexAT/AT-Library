@@ -528,6 +528,12 @@ class LongFloat
    
     public function compand()
     {
+        if (!gmp_sign($this->numerator)) {
+            # clear the denominator in case we are zero
+            $this->denominator = 1;
+            return $this;
+        }
+
         # compand us by the greatest common integer denominator of numerator and denominator, if any >1, to prevent overgrowth
         $gcd = gmp_gcd($this->numerator, $this->denominator);
         if (gmp_cmp($gcd, 1) > 0) {
