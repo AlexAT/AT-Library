@@ -344,7 +344,6 @@ class LongFloat
         
             if ($arg instanceof LongFloat) {
                 # compand argument and provide numerator and denominator from the companding result
-                print_r($arg);
                 $gcd = gmp_gcd($arg->numerator, $arg->denominator);
                 if (gmp_cmp($gcd, 1) > 0) {
                     $numerator = gmp_div($arg->numerator, $gcd);
@@ -355,8 +354,15 @@ class LongFloat
                 }
             }
 
-            # taking fractional powers (argument denominator level root of value in argument numerator power)is not yet possible
-            if (gmp_cmp($denominator, 1)) throw new \RangeException("Taking fractional powers is not possible");
+            # taking fractional powers is possible but tricky (argument denominator level root of value in argument numerator power)
+            if (gmp_cmp($denominator, 1)) {
+                # as auto-rounding can affect the result precision, we disable it for the time of operation, also we take care root must come second as it loses arbitrary precision
+                $autoRounding = $this->autoRounding;
+                $this->autoRounding = false;
+                $this->pow($numerator);
+                $this->autoRounding = $autoRounding;
+                return $this->root($denominator);
+            }
 
             # convert argument to integer
             if ((gmp_cmp($numerator, PHP_INT_MAX) > 0) || (gmp_cmp($numerator, PHP_INT_MIN) < 0)) throw new \RangeException("The power is too powerful");
@@ -369,24 +375,128 @@ class LongFloat
             $this->numerator = 1;
             $this->denominator = 1;
             return $this;
-        } elseif ($arg > 0) {
+        }
+      
+        if ($arg == 1) return $this; # anything in power of 1 is unchanged value
+
+        if ($arg > 0) {
             $this->numerator = gmp_pow($this->numerator, $arg);
             $this->denominator = gmp_pow($this->denominator, $arg);
         } else {
-            # for negative powers, we need to just swap our numerator and denominator, but another corner case is negative power of 0 that causes division by zero error
+            # for negative powers, we need to just swap our numerator and denominator, but another corner case is negative power of 0
             if (!gmp_sign($this->numerator)) throw new \RangeException("Taking negative power of zero is not possible");
             $arg = -$arg;
             $numerator = $this->numerator;
             $this->numerator = $this->denominator;
             $this->numerator = gmp_pow($this->denominator, $arg);
             $this->denominator = gmp_pow($numerator, $arg);
-
             if (gmp_sign($this->denominator) < 0) {
                 # invert signs so denominator is positive
                 $this->numerator = gmp_neg($this->numerator);
                 $this->denominator = gmp_neg($this->denominator);
             }
         }
+
+        return $this->autoRounding ? $this->checkRound() : ($this->autoCompand ? $this->checkCompand() : $this);
+    }
+    
+    # alias for root(2), all root() implications apply
+    public function sqrt()
+    {
+        return $this->root(2);
+    }
+    
+    # taking root is one of operations that cannot guarantee arbitrary precision, it is always performed at most at maxDecimals+1 precision
+    public function root($arg)
+    {
+        if (!is_integer($arg)) {
+            if (!$arg instanceof LongFloat) {
+                # integer handling is easy, we just take powers of both our numerator and denominator and that is it, the slightly separate handling here is because we need to check for zero and sign
+                if (is_integer($arg)) {
+                } elseif ($arg instanceof \GMP) {
+                    # provide integer GMP argument directly as numerator with denominator 1
+                    $numerator = $arg; 
+                    $denominator = 1;
+                } else {
+                    $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding);
+                }
+            }
+        
+            if ($arg instanceof LongFloat) {
+                # compand argument and provide numerator and denominator from the companding result
+                $gcd = gmp_gcd($arg->numerator, $arg->denominator);
+                if (gmp_cmp($gcd, 1) > 0) {
+                    $numerator = gmp_div($arg->numerator, $gcd);
+                    $denominator = gmp_div($arg->denominator, $gcd);
+                } else {
+                    $numerator = $arg->numerator;
+                    $denominator = $arg->denominator;
+                }
+            }
+
+            # taking fractional power roots is possible but tricky (argument numerator level root of value in argument denominator power)
+            if (gmp_cmp($denominator, 1)) {
+                # as auto-rounding can affect the result precision, we disable it for the time of operation, also we take care root must come second as it loses arbitrary precision
+                $autoRounding = $this->autoRounding;
+                $this->autoRounding = false;
+                $this->pow($denominator);
+                $this->autoRounding = $autoRounding;
+                return $this->root($numerator);
+            }
+
+            # taking fractional powers is possible (argument denominator level root of value in argument numerator power)is not yet possible
+            if (gmp_cmp($denominator, 1)) throw new \RangeException("Taking fractional power roots is not possible");
+
+            # convert argument to integer
+            if ((gmp_cmp($numerator, PHP_INT_MAX) > 0) || (gmp_cmp($numerator, PHP_INT_MIN) < 0)) throw new \RangeException("The root power is too powerful");
+            $arg = gmp_intval($numerator);
+        }
+
+        # now take the root of integer
+        if ($arg == 0) throw new \RangeException("Taking root of zero power is not possible");
+        if ($arg == 1) return $this; # power 1 root of everything is unchanged value
+        
+        # signs are tricky, if root power is even, negative numbers do not have any roots
+        if ((!($arg & 1)) && (gmp_sign($this->numerator) < 0)) throw new \RangeException("Taking even power roots from negative numbers is not possible");
+        
+        if ($arg > 0) {
+            # here is the precision issue, pre-multiply both our numerator and denominator by maxDecimals+1 in the given power to ensure there is no precision loss below maxDecimals
+            $this->numerator = gmp_mul($this->numerator, gmp_pow($this::$multipliers[$precision = $this->maxDecimals + 1] ?? $this->getMultiplier($precision), $arg));
+            $this->denominator = gmp_mul($this->denominator, gmp_pow($this::$multipliers[$precision], $arg));
+            
+            if ($arg == 2) {
+                # the square root is optimized
+                $this->numerator = gmp_sqrt($this->numerator);
+                $this->denominator = gmp_sqrt($this->denominator);
+            } else {
+                $this->numerator = gmp_root($this->numerator, $arg);
+                $this->denominator = gmp_root($this->denominator, $arg);
+            }
+        } else {
+            # for negative root powers, we need to just swap our numerator and denominator, but another corner case is root of negative power from 0
+            if (!gmp_sign($this->numerator)) throw new \RangeException("Taking negative power root of zero is not possible");
+            $arg = -$arg;
+
+            # here is the precision issue, pre-multiply both our numerator and denominator by maxDecimals+1 in the given power to ensure there is no precision loss below maxDecimals
+            $this->numerator = gmp_mul($this->numerator, gmp_pow($this::$multipliers[$precision = $this->maxDecimals + 1] ?? $this->getMultiplier($precision), $arg));
+            $this->denominator = gmp_mul($this->denominator, gmp_pow($this::$multipliers[$precision], $arg));
+
+            $numerator = $this->numerator;
+            if ($arg == 2) {
+                # again, the square root is optimized
+                $this->numerator = gmp_sqrt($this->denominator);
+                $this->denominator = gmp_sqrt($numerator);
+            } else {
+                $this->numerator = gmp_root($this->denominator, $arg);
+                $this->denominator = gmp_root($numerator, $arg);
+            }
+            if (gmp_sign($this->denominator) < 0) {
+                # invert signs so denominator is positive
+                $this->numerator = gmp_neg($this->numerator);
+                $this->denominator = gmp_neg($this->denominator);
+            }
+        }
+
         return $this->autoRounding ? $this->checkRound() : ($this->autoCompand ? $this->checkCompand() : $this);
     }
 
