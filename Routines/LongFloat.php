@@ -539,6 +539,42 @@ class LongFloat
         # if our denominator is less than or equal to the precision required, we do nothing, otherwise we do the companding
         return (gmp_cmp($this->denominator, $this::$multipliers[$precision = $decimals ?? $this->maxDecimals] ?? $this->getMultiplier($precision)) <= 0) ? $this : $this->compand();
     }
+    
+    public function isInteger()
+    {
+        # a tricky form of compand
+        if (!gmp_sign($this->numerator)) {
+            # clear the denominator in case we are zero
+            $this->denominator = 1;
+            return true;
+        }
+        
+        if (!gmp_cmp($this->denominator, 1)) return true;
+
+        $gcd = gmp_gcd($this->numerator, $this->denominator);
+        if (!gmp_cmp($gcd, $this->denominator)) {
+            $this->numerator = gmp_div($this->numerator, $gcd, GMP_ROUND_ZERO);
+            $this->denominator = 1;
+            return true;
+        }
+
+        return false;
+    }
+    
+    public function isZero()
+    {
+        return !gmp_sign($this->numerator);
+    }
+    
+    public function isPositive()
+    {
+        return (gmp_sign($this->numerator) > 0);
+    }
+    
+    public function isNegative()
+    {
+        return (gmp_sign($this->numerator) < 0);
+    }
 
     public function toString($maxDecimals = null, $rounding = null)
     {
