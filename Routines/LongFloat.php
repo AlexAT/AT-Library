@@ -270,6 +270,12 @@ class LongFloat
         return $this->autoRounding ? $this->checkRound() : ($this->autoCompand ? $this->checkCompand() : $this);
     }
     
+    public function abs()
+    {
+        $this->numerator = gmp_abs($this->numerator);
+        return $this;
+    }
+    
     public function neg()
     {
         $this->numerator = gmp_neg($this->numerator);
@@ -625,13 +631,14 @@ class LongFloat
     public function pi()
     {
         # PI calculation (Gauss-Legendre) with current max decimals
-        $decimals = $this->maxDecimals * 2; # do twice as much to prevent rounding errors
+        $loops = ceil(log($this->maxDecimals + 1, 2));
+        $decimals = $this->maxDecimals + $loops; # the number of guard digits is roughly equivalent to the number of loops
+
+        # do the math
         $a = new $this(1, $decimals, $this::ROUND_MATH, false, true);
         $b = (new $this(2, $decimals, $this::ROUND_MATH, false, true))->sqrt()->divRev(1);
         $t = new $this("0.25", $decimals, $this::ROUND_MATH, false, true);
         $p = new $this(1, $decimals, $this::ROUND_MATH, false, true);
-
-        $loops = ceil(log($decimals, 2));
         for ($i = 0; $i < $loops; $i++) {
             $aPrev = clone $a; # aPrev = a
             $a->add($b)->div(2); # a = (a + b) / 2
@@ -639,14 +646,12 @@ class LongFloat
             $t->sub($aPrev->sub($a)->mul($aPrev)->mul($p)); # t = t - (p * ((aPrev - a) ^ 2))
             $p->mul(2); # p = p * 2
         }
-        
-        # approximate PI as (a + b) ^ 2 / (t * 4)
-        $a->add($b)->mul($a)->div($t->mul(4));
+        $a->add($b)->mul($a)->div($t->mul(4)); # approximate PI as (a + b) ^ 2 / (t * 4)
         
         # round and applaud
         return $this->set($a)->round();
     }
-    
+
     # this one gets rounded numerator value for specific decimal precision and rounding
     protected function getRoundedValue($numerator, $denominator, $decimals, $rounding)
     {
