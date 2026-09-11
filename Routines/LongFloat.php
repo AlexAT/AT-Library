@@ -275,6 +275,19 @@ class LongFloat
         $this->numerator = gmp_neg($this->numerator);
         return $this;
     }
+    
+    public function inv()
+    {
+        $numerator = $this->numerator;
+        $this->numerator = $this->denominator;
+        $this->denominator = $numerator;
+        if (gmp_sign($this->denominator) < 0) {
+            # invert signs so denominator is positive
+            $this->numerator = gmp_neg($this->numerator);
+            $this->denominator = gmp_neg($this->denominator);
+        }
+        return $this;
+    }
 
     # returns -1 if we are negative, 0 if we are zero, 1 if we are positive
     public function sign()
