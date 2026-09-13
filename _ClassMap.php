@@ -37,6 +37,7 @@ return
     'ATL\\Task\\IWaitOn' => 'Task/Primitives.php',
     'ATL\\Task\\TWaitOn' => 'Task/Primitives.php',
     'ATL\\Task\\WaitOn' => 'Task/Primitives.php',
+    'ATL\\Task\\WaitOnAll' => 'Task/Primitives.php',
     'ATL\\Task\\WaitOnAny' => 'Task/Primitives.php',
     'ATL\\Task\\Promise' => 'Task/Primitives.php',
     'ATL\\Task\\GarbageCollector' => 'Task/Primitives.php',

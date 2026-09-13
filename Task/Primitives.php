@@ -87,6 +87,7 @@ trait TWaitOn
 }
 
 class WaitOn extends \ATL\Task implements \ATL\Task\IWaitOn { use \ATL\Task\TWaitOn; }
+class WaitOnAll extends \ATL\Task implements \ATL\Task\IWaitOn { use \ATL\Task\TWaitOn; }
 
 # This extended WaitOn task class allows to wait until at least one of the tasks terminates before proceeding (yield it from your task to wait)
 # Optional timeout can be specified, this task is manually scheduled task and automatically reschedules itself to execute on any task termination
