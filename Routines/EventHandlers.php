@@ -56,6 +56,8 @@ trait TEventHandlers
                     $target[$hOwner] = $hCallback;
             }
             $this->ehOnEventHandlerAdd($owner, $handler, $callback, $runHandler); # notify about new handler and possibly invoke handler for the first time
+        } else {
+            if (empty($this->ehEventHandlers[$handler])) unset($this->ehEventHandlers[$handler]); # remove empty handler set
         }
     }
 

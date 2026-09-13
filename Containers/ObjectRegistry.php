@@ -106,6 +106,16 @@ trait TObjectRegistry
         static::$objectArgs[$objectName] = $args;
     }
 
+    public static function tryRegisterInstance($objectName, $className, ...$args)
+    {
+        try {
+            $this->registerInstance($objectName, $className, ...$args);
+            return true;
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+    
     public static function registerInstanceObject($objectName, $object, $errorIfExists = true)
     {
         if ($errorIfExists && isset(static::$objects[$objectName]))
@@ -113,14 +123,15 @@ trait TObjectRegistry
         static::$objects[$objectName] = $object;
     }
 
-    public static function getInstance($objectName)
+    public static function getInstance($objectName, $errorIfNotExists = true, $autoregisterClassName = null, ...$args)
     {
         if (!isset(static::$objects[$objectName])) {
             if (!isset(static::$objectClasses[$objectName])) {
-                if (static::$autoregister) {
-                    static::registerInstance($objectName, $objectName);
+                if (static::$autoregister || ($autoregisterClassName !== null)) {
+                    static::registerInstance($objectName, $autoregisterClassName ?? $autoregisterClassName, ...$args);
                 } else {
-                    throw new \ErrorException("Object `{$objectName}` is not registered with the object registry `".static::class."`");
+                    if ($errorIfNotExists) throw new \ErrorException("Object `{$objectName}` is not registered with the object registry `".static::class."`");
+                    return null;
                 }
             }
             $instance = $newInstance = (!(static::$objectClasses[$objectName] instanceof \Closure)) ?

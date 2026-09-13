@@ -677,6 +677,12 @@ trait TTaskLoop
         $loop->taskLoopTerminateOnNoTasks = false;
         return $loop;
     }
+    
+    # default TaskLoop instance
+    public static function getDefaultTaskLoop()
+    {
+        return \ATL\ObjectRegistry::getInstance('\\ATL\\Default\\TaskLoop', false, static::class);
+    }
 }
 
 class TaskLoop extends \ATL\Task implements \ATL\ITaskLoop { use \ATL\TTaskLoop; }
