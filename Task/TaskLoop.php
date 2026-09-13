@@ -127,6 +127,7 @@ interface ITaskLoop
     # Public task manipulation API
 
     public function addTask($handler, ...$parameters);
+    public function addTasks(...$tasks);
     public function isTaskPresent(/** @var \ATL\Task */ $taskObject);
     public function isTaskScheduled(/** @var \ATL\Task */ $taskObject, $throwIfNotExists = false);
     public function isTaskActive(/** @var \ATL\Task */ $taskObject, $throwIfNotExists = false);
@@ -191,10 +192,9 @@ trait TTaskLoop
     public function __construct(...$tasks)
     {
         if (hrtime(true) === false) throw new \ErrorException("TaskLoop cannot run on platforms with non-working hrtime()");
-        foreach ($tasks as $task) $this->addTask($task);
+        if (!empty($tasks)) $this->addTasks(...$tasks);
 
         # construct parent Task object for TaskLoop nesting, it could be we never use it but anyways
-
         # for when TaskLoop itself is used as Task, we use optimized Generator loop as our tasks may be of Fiber type and nesting Fiber stacks is not supported
         parent::__construct([$this, 'tlLoopHandler']);
     }
@@ -427,6 +427,12 @@ trait TTaskLoop
 
         # return task object
         return $handler;
+    }
+    
+    # quickly adds multiple tasks with no parameters
+    public function addTasks(...$tasks)
+    {
+        foreach ($tasks as $task) $this->addTask($task);
     }
 
     # task is present when it is added to the TaskLoop
@@ -679,9 +685,11 @@ trait TTaskLoop
     }
     
     # default TaskLoop instance
-    public static function getDefaultTaskLoop()
+    public static function getDefaultTaskLoop(...$tasks)
     {
-        return \ATL\ObjectRegistry::getInstance('\\ATL\\Default\\TaskLoop', false, static::class);
+        $taskLoop = \ATL\ObjectRegistry::getInstance('\\ATL\\Default\\TaskLoop', false, static::class);
+        if (!empty($tasks)) $taskLoop->addTasks($tasks);
+        return $taskLoop;
     }
 }
 
