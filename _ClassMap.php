@@ -127,6 +127,34 @@ return
     # Sockets
 
     ########
+    # New socket code
+
+    # Base socket and socket buffers abstraction
+    'ATL\\Sockets\\ISocket' => 'Sockets/Socket.php',
+    'ATL\\Sockets\\TSocket' => 'Sockets/Socket.php',
+    'ATL\\Sockets\\Socket' => 'Sockets/Socket.php',
+    'ATL\\Sockets\\SocketException' => 'Sockets/Socket.php',
+    
+    'ATL\\Sockets\\IBuffer' => 'Sockets/Buffers/Buffer.php',
+    'ATL\\Sockets\\TBuffer' => 'Sockets/Buffers/Buffer.php',
+    'ATL\\Sockets\\Buffer' => 'Sockets/Buffers/Buffer.php',
+
+    'ATL\\Sockets\\IMessageBuffer' => 'Sockets/Buffers/MessageBuffer.php',
+    'ATL\\Sockets\\TMessageBuffer' => 'Sockets/Buffers/MessageBuffer.php',
+    'ATL\\Sockets\\MessageBuffer' => 'Sockets/Buffers/MessageBuffer.php',
+
+    'ATL\\Sockets\\IDatagramBuffer' => 'Sockets/Buffers/MessageBuffer.php',
+    'ATL\\Sockets\\TDatagramBuffer' => 'Sockets/Buffers/MessageBuffer.php',
+    'ATL\\Sockets\\DatagramBuffer' => 'Sockets/Buffers/MessageBuffer.php',
+    
+    'ATL\\Sockets\\IStreamBuffer' => 'Sockets/Buffers/StreamBuffer.php',
+    'ATL\\Sockets\\TStreamBuffer' => 'Sockets/Buffers/StreamBuffer.php',
+    'ATL\\Sockets\\StreamBuffer' => 'Sockets/Buffers/StreamBuffer.php',
+
+    ########
+    # Old socket code
+
+    ########
     # Socket abstraction layer
 
     # Base socket class
