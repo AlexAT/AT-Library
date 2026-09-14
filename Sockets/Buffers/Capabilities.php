@@ -4,7 +4,7 @@ namespace ATL\Sockets;
 
 ########
 # the very basic message/datagram buffer capability
-# provides base read(), write(), peek(), returnRead(), a very easy implementation as all these except read() are just aliases to skbPopLeft(), skbAddRight(), skbPeekLeft() skbAddLeft(), skbRequestFlush()
+# provides base read(), write(), peek(), returnRead()
 
 interface IBufferBaseCapability
 {
@@ -29,7 +29,9 @@ trait TBufferBaseCapability
     
     public function write($data)
     {
+        if (!$this->isWriteable()) return false; # writing to not open or closed buffer is a bad idea
         $this->skbAddRight($data);
+        return true;
     }
     
     public function peek()
@@ -70,6 +72,7 @@ trait TBufferByteSizeCapability
     public function write($data)
     {
         if ($data === null) throw new \Exception('Attempted to write null to the byte-sized socket buffer'); # cannot add nulls to the byte buffer
+        if (!$this->isWriteable()) return false; # writing to not open or closed buffer is a bad idea
         $this->skbAddRight($data);
     }
     
@@ -104,7 +107,9 @@ trait TBufferFlushCapability
 {
     public function flush()
     {
+        if (!$this->isWriteable()) return false; # flushing not open or closed buffer is a bad idea
         $this->ehInvokeEventHandlers('flush', $this);
+        return true;
     }
 }
 
@@ -221,6 +226,8 @@ trait TBufferBulkCapability
 
     public function writeBulk($dataSet)
     {
+        if (!$this->isWriteable()) return false; # writing to not open or closed buffer is a bad idea
+
         $writeSize = 0;
         foreach ($dataSet as $data) {
             $writeSize += $this->skbGetDataSize($data);
@@ -308,6 +315,7 @@ trait TBufferBulkStringReadCapability
 interface IBufferDelimitedReadCapability extends IBufferBaseCapability, IBufferByteReadCapability, IBufferBulkCapability
 {
     public function setDelimiter($delimiter);
+    public function skbDelimitedReadScanReset();
     public function readDelimited($maxLineLength = PHP_INT_MAX, $throwOnImpossibleRead = false);
     public function readDelimitedBulk($maxLineLength = PHP_INT_MAX, $maxReadCount = PHP_INT_MAX, $throwOnImpossibleRead = false);
 }
@@ -325,6 +333,11 @@ trait TBufferDelimitedReadCapability
     {
         $this->skbDelimitedReadDelimiter = (string) $delimiter;
         $this->skbDelimitedReadDelimiterLength = strlen($delimiter);
+        $this->skbDelimitedReadScanReset();
+    }
+    
+    public function skbDelimitedReadScanReset()
+    {
         $this->skbDelimitedReadLastScanPosition = 0;
         $this->skbDelimitedReadScanBuffer = '';
         $this->skbDelimitedReadScanBufferLength = 0;
@@ -386,16 +399,9 @@ trait TBufferDelimitedReadCapability
                             $this->skbSizeAdded(1, 0, true, $this::SKB_SIZE_OPERATION_OTHER); # just add 1 new element to the buffer without changing the data size (as we remove exactly how much we need accounting for the new element)
                         }
                         
-                        # prepare the resulting read and remove it from the buffer
+                        # prepare the resulting read, reset scan, remove result from the buffer and return it
                         $result = substr($this->skbDelimitedReadScanBuffer, 0, $rPos);
-                        
-                        # reset delimiter buffer and all scanning positions
-                        $this->skbDelimitedReadLastScanPosition = 0;
-                        $this->skbDelimitedReadScanBuffer = '';
-                        $this->skbDelimitedReadScanBufferLength = 0;
-                        $this->skbDelimitedReadScanBufferPosition = 0;
-                        
-                        # finally, remove the read and return the result
+                        $this->skbDelimitedReadScanReset();
                         $this->skbSizeRemoved($position, $rPos, false, $this::SKB_SIZE_OPERATION_POP_LEFT);
                         return $result;
                     } else {
@@ -438,6 +444,19 @@ trait TBufferDelimitedReadCapability
         }
         
         return $read;
+    }
+    
+    # monitor socket data manipulation, we can only tolerate right side additions, the rest causes scan reset
+    protected function skbSizeRemoved($count, $size, $silent, $operationHint = null)
+    {
+        if ($this->skbDelimitedReadScanBufferLength != 0) $this->skbDelimitedReadScanReset(); # at least we can avoid calling that each bloody time
+        parent::skbSizeRemoved($count, $size, $silent, $operationHint);
+    }
+
+    protected function skbSizeAdded($count, $size, $silent, $operationHint = null)
+    {
+        if (($operationHint != $this::SKB_SIZE_OPERATION_ADD_RIGHT) && ($this->skbDelimitedReadScanBufferLength != 0)) $this->skbDelimitedReadScanReset(); # we can tolerate right add and do not need to call this if no scan
+        parent::skbSizeAdded($count, $size, $silent, $operationHint);
     }
 }
 

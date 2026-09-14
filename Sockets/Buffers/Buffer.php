@@ -116,6 +116,7 @@ interface IBuffer
 
     public function isOpening();
     public function isOpen();
+    public function isWriteable();
     public function isClosing();
     public function isClosed();
     public function isAborted();
@@ -135,6 +136,22 @@ interface IBuffer
     public function onClosed($owner, $callback = null, $silent = false);
     public function onAborted($owner, $callback = null, $silent = false);
     public function onDataRead($owner, $callback = null, $silent = false);
+    
+    ########
+    # internal interface
+    # as PHP does not allow to declare protected in the interfaces, we just place it here commented
+/*
+    protected function skbInitialize();
+    protected function skbDataCleared($silent);
+    protected function skbDataRemoved($data, $silent, $operationHint = null);
+    protected function skbSizeRemoved($count, $size, $silent, $operationHint = null);
+    protected function skbDataAdded($data, $silent, $operationHint = null);
+    protected function skbSizeAdded($count, $size, $silent, $operationHint = null);
+    protected function skbGetDataSize($data);
+    protected function skbExtendMaxSize($newMaxSize, $silent);
+    protected function skbRequestMoreData();
+    protected function skbSendEventModeData();
+*/
 }
 
 trait TBuffer
@@ -403,9 +420,14 @@ trait TBuffer
     
     public function isOpen()
     {
-        return (($this->skbState >= $this::SKB_STATE_OPEN) && ($this->skbState < $this::SKB_STATE_CLOSED));
+        return (($this->skbState >= $this::SKB_STATE_OPEN) && ($this->skbState < $this::SKB_STATE_CLOSING));
     }
     
+    public function isWriteable()
+    {
+        return (($this->skbState >= $this::SKB_STATE_OPEN) && ($this->skbState < $this::SKB_STATE_CLOSED));
+    }
+
     public function isClosing()
     {
         return (($this->skbState >= $this::SKB_STATE_CLOSING) && ($this->skbState < $this::SKB_STATE_CLOSED));
