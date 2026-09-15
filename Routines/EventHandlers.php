@@ -58,6 +58,7 @@ trait TEventHandlers
             $this->ehOnEventHandlerAdd($owner, $handler, $callback, $runHandler); # notify about new handler and possibly invoke handler for the first time
         } else {
             if (empty($this->ehEventHandlers[$handler])) unset($this->ehEventHandlers[$handler]); # remove empty handler set
+            $this->ehOnEventHandlerRemove($owner, $handler);
         }
     }
 
@@ -72,19 +73,49 @@ trait TEventHandlers
             $this->addEventHandler($owner, $handler, $callback, $runHandlers, $addLast);
     }
 
-    # removes event handlers for specific owner
+    # removes event handlers for specific owner or handler names
     # normally it is all handlers but optionally can be used with list of handler names
-    public function removeEventHandlers($owner, $handlerNames = null)
+    public function removeEventHandlers($owner = null, $handlerNames = null)
     {
-        if (is_object($owner)) $owner = spl_object_id($owner);
-        if ($handlerNames === null) {
-            foreach ($this->ehEventHandlers as $handler => &$callbacks) {
-                unset($callbacks[$owner]);
-            } unset($callbacks);
+        if ($owner !== null) {
+            if (is_object($owner)) $owner = spl_object_id($owner);
+            if ($handlerNames === null) {
+                foreach ($this->ehEventHandlers as $handler => $callbacks) {
+                    if (isset($callbacks[$owner])) {
+                        unset($this->ehEventHandlers[$handler][$owner]);
+                        if (empty($this->ehEventHandlers[$handler])) unset($this->ehEventHandlers[$handler]); # remove empty handler set
+                        $this->ehOnEventHandlerRemove($owner, $handler);
+                    }
+                }
+            } else {
+                foreach (is_array($handlerNames) ? $handlerNames : [$handlerNames] as $handler) {
+                    if (isset($this->ehEventHandlers[$handler][$owner])) {
+                        unset($this->ehEventHandlers[$handler][$owner]);
+                        if (empty($this->ehEventHandlers[$handler])) unset($this->ehEventHandlers[$handler]); # remove empty handler set
+                        $this->ehOnEventHandlerRemove($owner, $handler);
+                    }
+                }
+            }
         } else {
-            $handlerNames = is_array($handlerNames) ? $handlerNames : [$handlerNames];
-            foreach ($handlerNames as $handler)
-                unset($this->ehEventHandlers[$handler][$owner]);
+            if ($handlerNames === null) {
+                foreach ($this->ehEventHandlers as $handler => $callbacks) {
+                    foreach ($callbacks as $owner => $callback) {
+                        unset($this->ehEventHandlers[$handler][$owner]);
+                        if (empty($this->ehEventHandlers[$handler])) unset($this->ehEventHandlers[$handler]); # remove empty handler set
+                        $this->ehOnEventHandlerRemove($owner, $handler);
+                    }
+                }
+            } else {
+                foreach (is_array($handlerNames) ? $handlerNames : [$handlerNames] as $handler) {
+                    if (isset($this->ehEventHandlers[$handler])) {
+                        foreach($this->ehEventHandlers[$handler] as $owner => $callback) {
+                            unset($this->ehEventHandlers[$handler][$owner]);
+                            if (empty($this->ehEventHandlers[$handler])) unset($this->ehEventHandlers[$handler]); # remove empty handler set
+                            $this->ehOnEventHandlerRemove($owner, $handler);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -124,7 +155,7 @@ trait TEventHandlers
     }
 
     # addEventHandlers internally calls ehOnEventHandlerAdd($owner, $handler, $callback, $runHandler) when handlers are added
-    # This is to perform additional actions on adding even handler, then optionally invoke event handler for the first time if runHandler is true and handler invocation condition is satisfied
+    # This is to perform additional actions on adding event handler, then optionally invoke event handler for the first time if runHandler is true and handler invocation condition is satisfied
     # Override in your class, otherwise handlers will never be called when added and runHandlers is true
     # handler is the same final event handler ID as in invokeEventHandler there
     protected function ehOnEventHandlerAdd($owner, $handler, $callback, $runHandler)
@@ -140,5 +171,11 @@ trait TEventHandlers
         #       if ($someOtherCondition) ($callback)($this, $someArg);
         #   break;
         # }
+    }
+
+    # This is to perform additional actions on removing event handler, like removing your own handlers from somewhere else, called once per each handler removal
+    protected function ehOnEventHandlerRemove($owner, $handler)
+    {
+        # handle removal, i.e. when remaining calbacks are empty, remove some corresponding handler of our own
     }
 }
