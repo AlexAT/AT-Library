@@ -134,22 +134,44 @@ return
     'ATL\\Sockets\\TSocket' => 'Sockets/Socket.php',
     'ATL\\Sockets\\Socket' => 'Sockets/Socket.php',
     'ATL\\Sockets\\SocketException' => 'Sockets/Socket.php',
-    
+
     'ATL\\Sockets\\IBuffer' => 'Sockets/Buffers/Buffer.php',
     'ATL\\Sockets\\TBuffer' => 'Sockets/Buffers/Buffer.php',
     'ATL\\Sockets\\Buffer' => 'Sockets/Buffers/Buffer.php',
 
-    'ATL\\Sockets\\IMessageBuffer' => 'Sockets/Buffers/MessageBuffer.php',
-    'ATL\\Sockets\\TMessageBuffer' => 'Sockets/Buffers/MessageBuffer.php',
-    'ATL\\Sockets\\MessageBuffer' => 'Sockets/Buffers/MessageBuffer.php',
+    'ATL\\Sockets\\BaseBuffer' => 'Sockets/Buffers/Buffer.php',
+    'ATL\\Sockets\\BulkBuffer' => 'Sockets/Buffers/Buffer.php',
+    'ATL\\Sockets\\MessageBuffer' => 'Sockets/Buffers/Buffer.php',
 
-    'ATL\\Sockets\\IDatagramBuffer' => 'Sockets/Buffers/MessageBuffer.php',
-    'ATL\\Sockets\\TDatagramBuffer' => 'Sockets/Buffers/MessageBuffer.php',
-    'ATL\\Sockets\\DatagramBuffer' => 'Sockets/Buffers/MessageBuffer.php',
-    
-    'ATL\\Sockets\\IStreamBuffer' => 'Sockets/Buffers/StreamBuffer.php',
-    'ATL\\Sockets\\TStreamBuffer' => 'Sockets/Buffers/StreamBuffer.php',
-    'ATL\\Sockets\\StreamBuffer' => 'Sockets/Buffers/StreamBuffer.php',
+    'ATL\\Sockets\\ByteBuffer' => 'Sockets/Buffers/Buffer.php',
+    'ATL\\Sockets\\ByteBulkBuffer' => 'Sockets/Buffers/Buffer.php',
+    'ATL\\Sockets\\ByteBulkStringBuffer' => 'Sockets/Buffers/Buffer.php',
+    'ATL\\Sockets\\ByteReadBulkStringBuffer' => 'Sockets/Buffers/Buffer.php',
+    'ATL\\Sockets\\ByteReadBulkStringDelimitedBuffer' => 'Sockets/Buffers/Buffer.php',
+
+    'ATL\\Sockets\\DatagramObjectBuffer' => 'Sockets/Buffers/Buffer.php',
+    'ATL\\Sockets\\DatagramBuffer' => 'Sockets/Buffers/Buffer.php',
+    'ATL\\Sockets\\StreamBuffer' => 'Sockets/Buffers/Buffer.php',
+
+    'ATL\\Sockets\\IBufferBaseCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\TBufferBaseCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\IBufferByteSizeCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\TBufferByteSizeCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\IBufferFlushCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\TBufferFlushCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\IBufferBulkCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\TBufferBulkCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\IBufferBulkStringReadCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\TBufferBulkStringReadCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\IBufferByteReadCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\TBufferByteReadCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\IBufferDelimitedReadCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\TBufferDelimitedReadCapability' => 'Sockets/Buffers/Capabilities.php',
+
+    'ATL\\Sockets\\IBufferMessageCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\IBufferDatagramCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\IBufferStreamCapability' => 'Sockets/Buffers/Capabilities.php',
+    'ATL\\Sockets\\IBufferMixedStreamCapability' => 'Sockets/Buffers/Capabilities.php',
 
     ########
     # Old socket code
@@ -315,7 +337,7 @@ return
     'ATL\\IPPrefix' => 'Routines/IPPrefix.php',
     'ATL\\IPv4Prefix' => 'Routines/IPPrefix.php',
     'ATL\\IPv6Prefix' => 'Routines/IPPrefix.php',
-    
+
     # Long floating point numbers
     'ATL\\LongFloat' => 'Routines/LongFloat.php',
 

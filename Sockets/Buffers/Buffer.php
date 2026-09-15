@@ -81,7 +81,7 @@ interface IBuffer
     const SKB_STATE_CLOSING = 0xC000;
     const SKB_STATE_CLOSED = 0xF000;
     const SKB_STATE_ABORTED = 0xF800;
-    
+
     const SKB_SIZE_OPERATION_POP_LEFT = 0;
     const SKB_SIZE_OPERATION_POP_RIGHT = 1;
     const SKB_SIZE_OPERATION_ADD_LEFT = 2;
@@ -90,8 +90,8 @@ interface IBuffer
     const SKB_SIZE_OPERATION_ADD_OTHER = 5;
     const SKB_SIZE_OPERATION_CLEAR = 6;
     const SKB_SIZE_OPERATION_OTHER = 7;
-    
-    public function __construct($id, $socket);
+
+    public function __construct($id, $socket, $parameters = []);
 
     public function skbClear($silent = false);
     public function skbPopLeft($silent = false, $noSizeUpdate = false);
@@ -124,24 +124,25 @@ interface IBuffer
 
     public function setEventReadMode($enabled = false);
 
-    public function onHasData($owner, $callback = null, $silent = false);
-    public function onNewData($owner, $callback = null, $silent = false);
-    public function onEmpty($owner, $handler = null, $silent = false);
-    public function onLowWatermark($owner, $callback = null, $silent = false);
-    public function onHighWatermark($owner, $callback = null, $silent = false);
-    public function onFull($owner, $callback = null, $silent = false);
-    public function onOpening($owner, $callback = null, $silent = false);
-    public function onOpen($owner, $callback = null, $silent = false);
-    public function onClosing($owner, $callback = null, $silent = false);
-    public function onClosed($owner, $callback = null, $silent = false);
-    public function onAborted($owner, $callback = null, $silent = false);
-    public function onDataRead($owner, $callback = null, $silent = false);
-    
+    public function onHasData($owner, $callback, $silent = false);
+    public function onNewData($owner, $callback, $silent = false);
+    public function onEmpty($owner, $callback, $silent = false);
+    public function onLowWatermark($owner, $callback, $silent = false);
+    public function onHighWatermark($owner, $callback, $silent = false);
+    public function onFull($owner, $callback, $silent = false);
+    public function onOpening($owner, $callback, $silent = false);
+    public function onOpen($owner, $callback, $silent = false);
+    public function onClosing($owner, $callback, $silent = false);
+    public function onClosed($owner, $callback, $silent = false);
+    public function onAborted($owner, $callback, $silent = false);
+    public function onDataRead($owner, $callback, $silent = false);
+
     ########
     # internal interface
     # as PHP does not allow to declare protected in the interfaces, we just place it here commented
 /*
-    protected function skbInitialize();
+    protected function skbInitializeDefaults($parameters);
+    protected function skbReadParameters($parameters)
     protected function skbDataCleared($silent);
     protected function skbDataRemoved($data, $silent, $operationHint = null);
     protected function skbSizeRemoved($count, $size, $silent, $operationHint = null);
@@ -159,7 +160,7 @@ trait TBuffer
     ########
     # take care every ID and volatile property of the socket buffer is public so weird manupulations are possible when necessary
     # this is to avoid using getters/setters for everything obscure specific socket types need to check, but modifying is discouraged
-    
+
     /** @var \ATL\Sockets\Socket */ public $skbSocket; # the socket associated
     public $skbId; # buffer ID for socket handlers
     public $splId; # object ID for external handlers
@@ -173,10 +174,10 @@ trait TBuffer
     # non-volatile settings, make sure these all are set properly if need to alter before buffer is requested to open
 
     # take care for generalized buffer this all is in datagrams/messages but may be different for specializations
-    public $skbMaxSize = 256; # indicates maximum buffer size at or above which the full event is sent
+    public $skbMaxSize; # indicates maximum buffer size at or above which the full event is sent
     public $skbRealMaxSize; # indicates temporary extension if the buffer size, does not affect events but remote needs to account for it when adding data, resets on reaching low watermark
-    public $skbLowWatermark = 64; # indicates maximum buffer size at or below which the lowWatermark event is sent
-    public $skbHighWatermark = 192; # indicates maximum buffer size at or above which the highWatermark event is sent
+    public $skbLowWatermark; # indicates maximum buffer size at or below which the lowWatermark event is sent
+    public $skbHighWatermark; # indicates maximum buffer size at or above which the highWatermark event is sent
 
     ########
     # volatile settings, these may be changed on the fly by their setters, can be read but never ever manipulate these directly
@@ -185,22 +186,39 @@ trait TBuffer
 
     ########
     # implementation
-    
-    public function __construct($id, $socket)
+
+    public function __construct($id, $socket, $parameters = [])
     {
         $this->skbId = $id;
         $this->splId = spl_object_id($this);
         $this->skbSocket = $socket;
         $this->skbState = $this::SKB_STATE_UNINITIALIZED;
-        $this->skbInitialize();
+        $this->skbInitializeDefaults($parameters);
+        $this->skbReadParameters($parameters);
         $this->skbClear(true);
     }
-    
-    protected function skbInitialize()
+
+    protected function skbInitializeDefaults($parameters)
     {
-        # specializations can place any additional internal initialization here that needs to happen before skbClear() call
+        # default parameters initialization
+        # specializations can place any additional internal initialization here that needs to happen before skbReadParameters() call
+        $this->skbRealMaxSize = $this->skbMaxSize = 256;
+        $this->skbLowWatermark = 64;
+        $this->skbHighWatermark = 192;
     }
-    
+
+    protected function skbReadParameters($parameters)
+    {
+        # specializations can place any additional internal parameter read here that needs to happen before skbClear() call
+        foreach ($parameters as $k => $v) {
+            switch ($k) {
+                case 'maxSize': $this->skbRealMaxSize = $this->skbMaxSize = $v; break;
+                case 'lowWatermark': $this->skbLowWatermark = $v; break;
+                case 'highWatermark': $this->skbHighWatermark = $v; break;
+            }
+        }
+    }
+
     ########
     # intrinsic data manipulation API for both ends of the buffer as it all depends on which side we are on
     # no peeking or bulk operations are provided, if these are necessary, they are to be implemented separately
@@ -212,7 +230,7 @@ trait TBuffer
         $this->skbData = new \SplDoublyLinkedList();
         $this->skbDataCleared($silent);
     }
-    
+
     public function skbPopLeft($silent = false, $noSizeUpdate = false)
     {
         if ($this->skbCount == 0) return false; # take care null is considered to be a valid readable value
@@ -228,7 +246,7 @@ trait TBuffer
         if (!$noSizeUpdate) $this->skbDataRemoved($data, $silent, $this::SKB_OPERATION_POP_RIGHT);
         return $data;
     }
-    
+
     public function skbAddLeft($data, $silent = false, $noSizeUpdate = false)
     {
         $this->skbData->unshift($data);
@@ -255,22 +273,22 @@ trait TBuffer
         if ($this->skbCount == 0) return false; # take care null is considered to be a valid readable value
         return $this->skbData->bottom();
     }
-    
+
     ########
     # internal data handlers (override for specifics)
-    
+
     protected function skbDataCleared($silent)
     {
         $this->skbSizeRemoved($this->skbCount, $this->skbSize, $silent, $this::SKB_SIZE_OPERATION_CLEAR);
         $this->skbRealMaxSize = $this->skbMaxSize;
         if ($silent) return;
     }
-    
+
     protected function skbDataRemoved($data, $silent, $operationHint = null)
     {
         $this->skbSizeRemoved(1, $this->skbGetDataSize($data), $silent, $operationHint);
     }
-    
+
     protected function skbSizeRemoved($count, $size, $silent, $operationHint = null)
     {
         $oldSize = $this->skbSize;
@@ -283,7 +301,7 @@ trait TBuffer
             $this->skbRealMaxSize = $this->skbMaxSize; # reset maximum buffer size on reaching low watermark
             if (!$silent) $this->ehInvokeEventHandlers('lowWatermark', $this);
         }
-        
+
         if ($silent) return;
         if ($this->skbCount == 0) $this->ehInvokeEventHandlers('empty', $this);
     }
@@ -292,7 +310,7 @@ trait TBuffer
     {
         $this->skbSizeAdded(1, $this->skbGetDataSize($data), $silent, $operationHint);
     }
-    
+
     protected function skbSizeAdded($count, $size, $silent, $operationHint = null)
     {
         $oldSize = $this->skbSize;
@@ -312,13 +330,13 @@ trait TBuffer
         if (($this->skbSize >= $this->skbMaxSize) && ($oldSize < $this->skbMaxSize))
             $this->ehInvokeEventHandlers('full', $this);
     }
-    
+
     # specializations may use their own data sizing here
     protected function skbGetDataSize($data)
     {
         return 1; # just count of buffer elements following skbCount
     }
-    
+
     protected function skbExtendMaxSize($newMaxSize, $silent)
     {
         if ($newMaxSize > $this->skbRealMaxSize) {
@@ -326,7 +344,7 @@ trait TBuffer
             if (!$silent) $this->skbRequestMoreData();
         }
     }
-    
+
     protected function skbRequestMoreData()
     {
         $this->ehInvokeEventHandlers('pendingData', $this);
@@ -346,12 +364,12 @@ trait TBuffer
     {
         return $this->skbSize;
     }
-    
+
     public function isEmpty()
     {
         return ($this->skbCount == 0);
     }
-    
+
     public function isFull()
     {
         return ($this->skbSize >= $this->skbMaxSize);
@@ -361,7 +379,7 @@ trait TBuffer
     {
         return ($this->skbSize > $this->skbLowWatermark);
     }
-    
+
     public function isBelowHighWatermark()
     {
         return ($this->skbSize < $this->skbHighWatermark);
@@ -369,21 +387,21 @@ trait TBuffer
 
     ########
     # intrinsic state manipulation API
-    
+
     public function skbSocketOpen()
     {
         if ($this->skbState >= $this::SKB_STATE_OPENING) throw new \ErrorException('Socket attempted to open socket buffer that is already initialized');
         $this->skbState = $this::SKB_STATE_OPENING;
         $this->ehInvokeEventHandlers('opening', $this);
     }
-    
+
     public function skbRemoteOpen()
     {
         if ($this->skbState >= $this::SKB_STATE_OPEN) throw new \ErrorException('Remote attempted to open socket buffer that is already open');
         $this->skbState = $this::SKB_STATE_OPEN;
         $this->ehInvokeEventHandlers('open', $this);
     }
-    
+
     public function skbSocketClose()
     {
         if ($this->skbState < $this::SKB_STATE_OPEN) throw new \ErrorException('Socket attempted to close socket buffer that is not yet open');
@@ -391,7 +409,7 @@ trait TBuffer
         $this->skbState = $this::SKB_STATE_CLOSING;
         $this->ehInvokeEventHandlers('closing', $this);
     }
-    
+
     public function skbRemoteClose()
     {
         if ($this->skbState < $this::SKB_STATE_OPEN) throw new \ErrorException('Remote attempted to close socket buffer that is not yet open');
@@ -408,21 +426,21 @@ trait TBuffer
         if ($sendClose) $this->ehInvokeEventHandlers('closed', $this);
         $this->ehInvokeEventHandlers('aborted', $this);
     }
-       
+
     ########
     # public socket buffer state API (override for specifics)
     # take care this state API must be consistent with the internal representation of all the state
-    
+
     public function isOpening()
     {
         return (($this->skbState >= $this::SKB_STATE_OPENING) && ($this->skbState < $this::SKB_STATE_OPEN));
     }
-    
+
     public function isOpen()
     {
         return (($this->skbState >= $this::SKB_STATE_OPEN) && ($this->skbState < $this::SKB_STATE_CLOSING));
     }
-    
+
     public function isWriteable()
     {
         return (($this->skbState >= $this::SKB_STATE_OPEN) && ($this->skbState < $this::SKB_STATE_CLOSED));
@@ -432,33 +450,33 @@ trait TBuffer
     {
         return (($this->skbState >= $this::SKB_STATE_CLOSING) && ($this->skbState < $this::SKB_STATE_CLOSED));
     }
-    
+
     public function isClosed()
     {
         return ($this->skbState >= $this::SKB_STATE_CLOSED);
     }
-    
+
     public function isAborted()
     {
         return ($this->skbState >= $this::SKB_STATE_ABORTED);
     }
-    
+
     public function isActive()
     {
         return (($this->skbState >= $this::SKB_STATE_OPENING) && ($this->skbState < $this::SKB_STATE_CLOSED));
     }
-    
+
     ########
     # volatile settings and their helpers
-    
+
     public function setEventReadMode($enabled = false)
     {
         $this->skbEventReadMode = $enabled;
-        
+
         # if enabled, send all accumulated data via event handler if any, otherwise leave the data intact until any handler is added
         if ($enabled) $this->skbSendEventModeData();
     }
-    
+
     protected function skbSendEventModeData()
     {
         if (isset($this->ehEventHandlers['dataRead']))
@@ -470,7 +488,8 @@ trait TBuffer
     # public event handler registration API and its helpers
 
     public function onHasData($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'hasData', $callback, !$silent); }
-    public function onEmpty($owner, $handler, $silent = false) { $this->addEventHandler($owner, 'empty', $callback, !$silent); }
+    public function onNewData($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'newData', $callback, !$silent); }
+    public function onEmpty($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'empty', $callback, !$silent); }
     public function onLowWatermark($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'lowWatermark', $callback, !$silent); }
     public function onHighWatermark($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'highWatermark', $callback, !$silent); }
     public function onFull($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'full', $callback, !$silent); }
@@ -508,7 +527,7 @@ trait TBuffer
             if (!$runHandler) break;
             if ($this->isFull()) $callback($this);
             break;
-            
+
             case 'opening':
             if (!$runHandler) break;
             if ($this->isOpening()) $callback($this);
@@ -533,7 +552,7 @@ trait TBuffer
             if (!$runHandler) break;
             if ($this->isAborted()) $callback($this);
             break;
-            
+
             case 'dataRead':
             if (!$runHandler) break;
 
@@ -544,12 +563,22 @@ trait TBuffer
     }
 }
 
-class Buffer implements \ATL\Sockets\IBuffer, \ATL\IEventHandlers
-{
-    use \ATL\Sockets\TBuffer;
-    use \ATL\TEventHandlers;
-}
+class BufferPrototype implements \ATL\IEventHandlers { use \ATL\TEventHandlers; }
+class Buffer extends BufferPrototype implements \ATL\Sockets\IBuffer { use \ATL\Sockets\TBuffer; }
 
 ########
-# here the very base buffer classes go
+# here the very base capability set based buffer classes go
 
+class BaseBuffer extends Buffer implements IBufferBaseCapability { use TBufferBaseCapability; }
+class BulkBuffer extends BaseBuffer implements IBufferBulkCapability { use TBufferBulkCapability; }
+class MessageBuffer extends BulkBuffer implements IBufferMessageCapability { }
+
+class ByteBuffer extends BaseBuffer implements IBufferByteSizeCapability { use TBufferByteSizeCapability; }
+class ByteBulkBuffer extends ByteBuffer implements IBufferBulkCapability { use TBufferBulkCapability; }
+class ByteBulkStringBuffer extends ByteBulkBuffer implements IBufferBulkStringReadCapability { use TBufferBulkStringReadCapability; }
+class ByteReadBulkStringBuffer extends ByteBulkStringBuffer implements IBufferByteReadCapability { use TBufferByteReadCapability; }
+class ByteReadBulkStringDelimitedBuffer extends ByteReadBulkStringBuffer implements IBufferDelimitedReadCapability { use TBufferDelimitedReadCapability; }
+
+class DatagramObjectBuffer extends MessageBuffer implements IBufferByteSizeCapability, IBufferDatagramCapability { use TBufferByteSizeCapability; }
+class DatagramBuffer extends ByteReadBulkStringBuffer implements IBufferDatagramCapability { }
+class StreamBuffer extends ByteReadBulkStringBuffer implements IBufferStreamCapability { }
