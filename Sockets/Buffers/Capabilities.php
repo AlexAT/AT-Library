@@ -117,6 +117,8 @@ trait TBufferByteSizeCapability
 
 interface IBufferFlushCapability
 {
+    const SKB_EVENT_FLUSH = 0x0100;
+
     public function flush();
 }
 
@@ -125,7 +127,7 @@ trait TBufferFlushCapability
     public function flush()
     {
         if (!$this->isWriteable()) return false; # flushing not open or closed buffer is a bad idea
-        $this->ehInvokeEventHandlers('flush', $this);
+        $this->ehInvokeEventHandlers($this::SKB_EVENT_FLUSH, $this);
         return true;
     }
 }

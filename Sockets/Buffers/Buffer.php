@@ -9,6 +9,8 @@ namespace ATL\Sockets;
 
 # The socket buffer data and state transitions are all event-based, connecting socket and remote (i.e. poller) API sets to react on buffer changes mutually
 # Event setters are lowerCamelCased on<event> calls, i.e. onHasData() for hasData event, onEmpty() for empty event, etc.
+# Take care that events must be set using class constants, as socket events are frequent and need to be optimized for performance
+
 # The events are defined as follows:
 # - hasData($buffer)
 #     invoked when some data is added to the empty buffer
@@ -82,14 +84,34 @@ interface IBuffer
     const SKB_STATE_CLOSED = 0xF000;
     const SKB_STATE_ABORTED = 0xF800;
 
-    const SKB_SIZE_OPERATION_POP_LEFT = 0;
-    const SKB_SIZE_OPERATION_POP_RIGHT = 1;
-    const SKB_SIZE_OPERATION_ADD_LEFT = 2;
-    const SKB_SIZE_OPERATION_ADD_RIGHT = 3;
-    const SKB_SIZE_OPERATION_POP_OTHER = 4;
-    const SKB_SIZE_OPERATION_ADD_OTHER = 5;
-    const SKB_SIZE_OPERATION_CLEAR = 6;
-    const SKB_SIZE_OPERATION_OTHER = 7;
+    const SKB_SIZE_OPERATION_POP_LEFT = 0x0000;
+    const SKB_SIZE_OPERATION_POP_RIGHT = 0x0001;
+    const SKB_SIZE_OPERATION_ADD_LEFT = 0x0002;
+    const SKB_SIZE_OPERATION_ADD_RIGHT = 0x0003;
+    const SKB_SIZE_OPERATION_POP_OTHER = 0x0004;
+    const SKB_SIZE_OPERATION_ADD_OTHER = 0x0005;
+    const SKB_SIZE_OPERATION_CLEAR = 0x0006;
+    const SKB_SIZE_OPERATION_OTHER = 0x0007;
+
+    const SKB_EVENT_HAS_DATA = 0x0000;
+    const SKB_EVENT_NEW_DATA = 0x0001;
+    const SKB_EVENT_EMPTY = 0x0002;
+    const SKB_EVENT_LOW_WATERMARK = 0x0003;
+    const SKB_EVENT_HIGH_WATERMARK = 0x0004;
+    const SKB_EVENT_FULL = 0x0005;
+    const SKB_EVENT_PENDING_DATA = 0x0006;
+
+    const SKB_EVENT_OPENING = 0x0010;
+    const SKB_EVENT_OPEN = 0x0011;
+    const SKB_EVENT_CLOSING = 0x0012;
+    const SKB_EVENT_CLOSED = 0x0013;
+    const SKB_EVENT_ABORTED = 0x0014;
+
+    const SKB_EVENT_DATA_READ = 0x0020;
+
+    const SKB_PARAMETER_MAX_SIZE = 0x0000;
+    const SKB_PARAMETER_LOW_WATERMARK = 0x0001;
+    const SKB_PARAMETER_HIGH_WATERMARK = 0x0002;
 
     public function __construct($id, $socket, $parameters = []);
 
@@ -130,6 +152,7 @@ interface IBuffer
     public function onLowWatermark($owner, $callback, $silent = false);
     public function onHighWatermark($owner, $callback, $silent = false);
     public function onFull($owner, $callback, $silent = false);
+    public function onPendingData($owner, $callback, $silent = false);
     public function onOpening($owner, $callback, $silent = false);
     public function onOpen($owner, $callback, $silent = false);
     public function onClosing($owner, $callback, $silent = false);
@@ -212,9 +235,9 @@ trait TBuffer
         # specializations can place any additional internal parameter read here that needs to happen before skbClear() call
         foreach ($parameters as $k => $v) {
             switch ($k) {
-                case 'maxSize': $this->skbRealMaxSize = $this->skbMaxSize = $v; break;
-                case 'lowWatermark': $this->skbLowWatermark = $v; break;
-                case 'highWatermark': $this->skbHighWatermark = $v; break;
+                case $this::SKB_PARAMETER_MAX_SIZE: $this->skbRealMaxSize = $this->skbMaxSize = $v; break;
+                case $this::SKB_PARAMETER_LOW_WATERMARK: $this->skbLowWatermark = $v; break;
+                case $this::SKB_PARAMETER_HIGH_WATERMARK: $this->skbHighWatermark = $v; break;
             }
         }
     }
@@ -299,11 +322,11 @@ trait TBuffer
 
         if (($this->skbSize <= $this->skbLowWatermark) && ($oldSize > $this->skbLowWatermark)) {
             $this->skbRealMaxSize = $this->skbMaxSize; # reset maximum buffer size on reaching low watermark
-            if (!$silent) $this->ehInvokeEventHandlers('lowWatermark', $this);
+            if (!$silent) $this->ehInvokeEventHandlers($this::SKB_EVENT_LOW_WATERMARK, $this);
         }
 
         if ($silent) return;
-        if ($this->skbCount == 0) $this->ehInvokeEventHandlers('empty', $this);
+        if ($this->skbCount == 0) $this->ehInvokeEventHandlers($this::SKB_EVENT_EMPTY, $this);
     }
 
     protected function skbDataAdded($data, $silent, $operationHint = null)
@@ -320,15 +343,15 @@ trait TBuffer
         if ($this->skbEventReadMode) return $this->skbSendEventModeData();
         if ($silent) return;
 
-        if ($this->skbCount == 1) $this->ehInvokeEventHandlers('hasData', $this);
+        if ($this->skbCount == 1) $this->ehInvokeEventHandlers($this::SKB_EVENT_HAS_DATA, $this);
 
-        $this->ehInvokeEventHandlers('newData', $this);
+        $this->ehInvokeEventHandlers($this::SKB_EVENT_NEW_DATA, $this);
 
         if (($this->skbSize >= $this->skbHighWatermark) && ($oldSize < $this->skbHighWatermark))
-            $this->ehInvokeEventHandlers('highWatermark', $this);
+            $this->ehInvokeEventHandlers($this::SKB_EVENT_HIGH_WATERMARK, $this);
 
         if (($this->skbSize >= $this->skbMaxSize) && ($oldSize < $this->skbMaxSize))
-            $this->ehInvokeEventHandlers('full', $this);
+            $this->ehInvokeEventHandlers($this::SKB_EVENT_FULL, $this);
     }
 
     # specializations may use their own data sizing here
@@ -347,7 +370,7 @@ trait TBuffer
 
     protected function skbRequestMoreData()
     {
-        $this->ehInvokeEventHandlers('pendingData', $this);
+        $this->ehInvokeEventHandlers($this::SKB_EVENT_PENDING_DATA, $this);
     }
 
     ########
@@ -392,14 +415,14 @@ trait TBuffer
     {
         if ($this->skbState >= $this::SKB_STATE_OPENING) throw new \ErrorException('Socket attempted to open socket buffer that is already initialized');
         $this->skbState = $this::SKB_STATE_OPENING;
-        $this->ehInvokeEventHandlers('opening', $this);
+        $this->ehInvokeEventHandlers($this::SKB_EVENT_OPENING, $this);
     }
 
     public function skbRemoteOpen()
     {
         if ($this->skbState >= $this::SKB_STATE_OPEN) throw new \ErrorException('Remote attempted to open socket buffer that is already open');
         $this->skbState = $this::SKB_STATE_OPEN;
-        $this->ehInvokeEventHandlers('open', $this);
+        $this->ehInvokeEventHandlers($this::SKB_EVENT_OPEN, $this);
     }
 
     public function skbSocketClose()
@@ -407,7 +430,7 @@ trait TBuffer
         if ($this->skbState < $this::SKB_STATE_OPEN) throw new \ErrorException('Socket attempted to close socket buffer that is not yet open');
         if ($this->skbState >= $this::SKB_STATE_CLOSING) throw new \ErrorException('Socket attempted to close socket buffer that is already closing or closed');
         $this->skbState = $this::SKB_STATE_CLOSING;
-        $this->ehInvokeEventHandlers('closing', $this);
+        $this->ehInvokeEventHandlers($this::SKB_EVENT_CLOSING, $this);
     }
 
     public function skbRemoteClose()
@@ -415,7 +438,7 @@ trait TBuffer
         if ($this->skbState < $this::SKB_STATE_OPEN) throw new \ErrorException('Remote attempted to close socket buffer that is not yet open');
         if ($this->skbState >= $this::SKB_STATE_CLOSED) throw new \ErrorException('Remote attempted to close socket buffer that is already closed');
         $this->skbState = $this::SKB_STATE_CLOSED;
-        $this->ehInvokeEventHandlers('closed', $this);
+        $this->ehInvokeEventHandlers($this::SKB_EVENT_CLOSED, $this);
     }
 
     public function skbAbort()
@@ -423,8 +446,8 @@ trait TBuffer
         if ($this->skbState >= $this::SKB_STATE_ABORTED) return;
         $sendClose = ($this->skbState < $this::SKB_STATE_CLOSED);
         $this->skbState = $this::SKB_STATE_ABORTED;
-        if ($sendClose) $this->ehInvokeEventHandlers('closed', $this);
-        $this->ehInvokeEventHandlers('aborted', $this);
+        if ($sendClose) $this->ehInvokeEventHandlers($this::SKB_EVENT_CLOSED, $this);
+        $this->ehInvokeEventHandlers($this::SKB_EVENT_ABORTED, $this);
     }
 
     ########
@@ -479,81 +502,82 @@ trait TBuffer
 
     protected function skbSendEventModeData()
     {
-        if (isset($this->ehEventHandlers['dataRead']))
+        if (isset($this->ehEventHandlers[$this::SKB_EVENT_DATA_READ]))
             while (($data = $this->skbPop(true)) !== false)
-                $this->ehInvokeEventHandlers('dataRead', $this, $data);
+                $this->ehInvokeEventHandlers($this::SKB_EVENT_DATA_READ, $this, $data);
     }
 
     ########
     # public event handler registration API and its helpers
 
-    public function onHasData($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'hasData', $callback, !$silent); }
-    public function onNewData($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'newData', $callback, !$silent); }
-    public function onEmpty($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'empty', $callback, !$silent); }
-    public function onLowWatermark($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'lowWatermark', $callback, !$silent); }
-    public function onHighWatermark($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'highWatermark', $callback, !$silent); }
-    public function onFull($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'full', $callback, !$silent); }
-    public function onOpening($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'opening', $callback, !$silent); }
-    public function onOpen($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'open', $callback, !$silent); }
-    public function onClosing($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'closing', $callback, !$silent); }
-    public function onClosed($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'closed', $callback, !$silent); }
-    public function onAborted($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'aborted', $callback, !$silent); }
-    public function onDataRead($owner, $callback, $silent = false) { $this->addEventHandler($owner, 'dataRead', $callback, !$silent); }
+    public function onHasData($owner, $callback, $silent = false) { $this->addEventHandler($owner, $this::SKB_EVENT_HAS_DATA, $callback, !$silent); }
+    public function onNewData($owner, $callback, $silent = false) { $this->addEventHandler($owner, $this::SKB_EVENT_NEW_DATA, $callback, !$silent); }
+    public function onEmpty($owner, $callback, $silent = false) { $this->addEventHandler($owner, $this::SKB_EVENT_EMPTY, $callback, !$silent); }
+    public function onLowWatermark($owner, $callback, $silent = false) { $this->addEventHandler($owner, $this::SKB_EVENT_LOW_WATERMARK, $callback, !$silent); }
+    public function onHighWatermark($owner, $callback, $silent = false) { $this->addEventHandler($owner, $this::SKB_EVENT_HIGH_WATERMARK, $callback, !$silent); }
+    public function onFull($owner, $callback, $silent = false) { $this->addEventHandler($owner, $this::SKB_EVENT_FULL, $callback, !$silent); }
+    public function onPendingData($owner, $callback, $silent = false) { $this->addEventHandler($owner, $this::SKB_EVENT_PENDING_DATA, $callback, !$silent); }
+    public function onOpening($owner, $callback, $silent = false) { $this->addEventHandler($owner, $this::SKB_EVENT_OPENING, $callback, !$silent); }
+    public function onOpen($owner, $callback, $silent = false) { $this->addEventHandler($owner, $this::SKB_EVENT_OPEN, $callback, !$silent); }
+    public function onClosing($owner, $callback, $silent = false) { $this->addEventHandler($owner, $this::SKB_EVENT_CLOSING, $callback, !$silent); }
+    public function onClosed($owner, $callback, $silent = false) { $this->addEventHandler($owner, $this::SKB_EVENT_CLOSED, $callback, !$silent); }
+    public function onAborted($owner, $callback, $silent = false) { $this->addEventHandler($owner, $this::SKB_EVENT_ABORTED, $callback, !$silent); }
+    public function onDataRead($owner, $callback, $silent = false) { $this->addEventHandler($owner, $this::SKB_EVENT_DATA_READ, $callback, !$silent); }
 
     protected function ehOnEventHandlerAdd($owner, $handler, $callback, $runHandler)
     {
         switch ($handler) {
-            case 'hasData':
+            case $this::SKB_EVENT_HAS_DATA:
             if (!$runHandler) break;
             if (!$this->isEmpty()) $callback($this);
             break;
 
-            case 'empty':
+            case $this::SKB_EVENT_EMPTY:
             if (!$runHandler) break;
             if ($this->isEmpty()) $callback($this);
             break;
 
-            case 'lowWatermark':
+            case $this::SKB_EVENT_LOW_WATERMARK:
             if (!$runHandler) break;
             if (!$this->isAboveLowWatermark()) $callback($this);
             break;
 
-            case 'highWatermark':
+            case $this::SKB_EVENT_HIGH_WATERMARK:
             if (!$runHandler) break;
             if ($this->isBelowHighWatermark()) $callback($this);
             break;
 
-            case 'full':
+            case $this::SKB_EVENT_FULL:
             if (!$runHandler) break;
             if ($this->isFull()) $callback($this);
             break;
 
-            case 'opening':
+            case $this::SKB_EVENT_OPENING:
             if (!$runHandler) break;
             if ($this->isOpening()) $callback($this);
             break;
 
-            case 'open':
+            case $this::SKB_EVENT_OPEN:
             if (!$runHandler) break;
             if ($this->isOpen()) $callback($this);
             break;
 
-            case 'closing':
+            case $this::SKB_EVENT_CLOSING:
             if (!$runHandler) break;
             if ($this->isClosing()) $callback($this);
             break;
 
-            case 'closed':
+            case $this::SKB_EVENT_CLOSED:
             if (!$runHandler) break;
             if ($this->isClosed()) $callback($this);
             break;
 
-            case 'aborted':
+            case $this::SKB_EVENT_ABORTED:
             if (!$runHandler) break;
             if ($this->isAborted()) $callback($this);
             break;
 
-            case 'dataRead':
+            case $this::SKB_EVENT_DATA_READ:
             if (!$runHandler) break;
 
             # when the first dataRead handler is added, all accumulated data needs to be sent to it
