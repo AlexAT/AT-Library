@@ -18,10 +18,10 @@ class LongFloat
 {
     # rounding mode details are demonstrated for 1-digit precision
     const ROUND_MATH = 0; # default rounding mode, 0.00 to 0.04 => 0.0, 0.05 to 0.09 => 0.1, -0.01 to -0.04 => 0.0, -0.05 to -0.09 => -0.1
-    const ROUND_TRUNC = 1; # truncation mode, 0.00 to 0.09 => 0.0, -0.01 to -0.09 => 0.0
-    const ROUND_FLOOR = 2; # floor mode, 0.00 to 0.09 => 0.0, -0.01 to -0.09 => 0.1
-    const ROUND_CEIL = 3; # ceil mode, 0.00 => 0.0, 0.01 to 0.09 => 0.1, -0.01 to -0.09 => 0.0
-    const ROUND_SPREAD = 4; # spread mode, 0.00 => 0.0, 0.01 to 0.09 => 0.1, -0.01 to -0.09 => 0.01
+    const ROUND_FLOOR = 1; # floor mode, 0.00 to 0.09 => 0.0, -0.01 to -0.09 => 0.1
+    const ROUND_CEIL = 2; # ceil mode, 0.00 => 0.0, 0.01 to 0.09 => 0.1, -0.01 to -0.09 => 0.0
+    const ROUND_TRUNC = 3; # truncation mode, 0.00 to 0.09 => 0.0, -0.01 to -0.09 => 0.0
+    const ROUND_SPREAD = 4; # spread mode, 0.00 => 0.0, 0.01 to 0.09 => 0.1, -0.01 to -0.09 => -0.1
 
     # never ever touch these in runtime, they are public to speed up some operations (methods take too much time to be called)
     public $numerator = 0; # take care this can be either integer or GMP
@@ -32,7 +32,7 @@ class LongFloat
     public $rounding;
     public $autoRounding;
     public $autoCompand;
-    
+
     # globals
     protected static $multipliers = []; # this one holds GMP floating point multipliers for all precisions noticed
 
@@ -113,7 +113,7 @@ class LongFloat
 
         return $this;
     }
-    
+
     # x = arg1 / arg2, arg1 and arg2 can only be integers or GMP integers, arg2 cannot be negative or zero
     public function setFraction($arg1, $arg2)
     {
@@ -141,7 +141,7 @@ class LongFloat
                 $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand); # convert to our own type
             }
         }
-        
+
         # to add two numbers, we multiply their denominators together and multiply each numerator by opposite denominator
         $this->numerator = gmp_add(gmp_mul($this->numerator, $arg->denominator), gmp_mul($arg->numerator, $this->denominator));
         $this->denominator = gmp_mul($this->denominator, $arg->denominator);
@@ -161,7 +161,7 @@ class LongFloat
                 $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand); # convert to our own type
             }
         }
-        
+
         # to subtract two numbers, we multiply their denominators together and multiply each numerator by opposite denominator
         $this->numerator = gmp_sub(gmp_mul($this->numerator, $arg->denominator), gmp_mul($arg->numerator, $this->denominator));
         $this->denominator = gmp_mul($this->denominator, $arg->denominator);
@@ -181,7 +181,7 @@ class LongFloat
                 $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand); # convert to our own type
             }
         }
-        
+
         # to subtract two numbers, we multiply their denominators together and multiply each numerator by opposite denominator
         $this->numerator = gmp_sub(gmp_mul($arg->numerator, $this->denominator), gmp_mul($this->numerator, $arg->denominator));
         $this->denominator = gmp_mul($this->denominator, $arg->denominator);
@@ -243,7 +243,7 @@ class LongFloat
     public function divRev($arg)
     {
         if (!gmp_sign($this->numerator)) throw new \RangeException("Division by zero");
-        
+
         if (!$arg instanceof LongFloat) {
             # integer handling is easy, we swap our numerator and denominator and then multiply the numerator
             # for case of us ourselves, we do not need to store anything as oldDenominator is already stored
@@ -256,7 +256,7 @@ class LongFloat
                 $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand); # convert to our own type
             }
         }
-        
+
         # for reverse division, we just cross-multiply our denominator by remote numerator as new numerator and our numerator by remote denominator as new denumerator
         # this requires saving old numerator during the operation, here we do not need to store anything else for case of us ourselves as oldNumerator is already stored
         $oldNumerator = $this->numerator;
@@ -269,19 +269,19 @@ class LongFloat
         }
         return $this->autoRounding ? $this->checkRound() : ($this->autoCompand ? $this->checkCompand() : $this);
     }
-    
+
     public function abs()
     {
         $this->numerator = gmp_abs($this->numerator);
         return $this;
     }
-    
+
     public function neg()
     {
         $this->numerator = gmp_neg($this->numerator);
         return $this;
     }
-    
+
     public function inv()
     {
         $numerator = $this->numerator;
@@ -315,14 +315,14 @@ class LongFloat
                 $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand); # convert to our own type
             }
         }
-        
+
         # if forced rounding is not specified, just compare multiplies of each argument by the remote denominator
         if (($decimals === null) && ($rounding === null))
             return gmp_cmp(gmp_mul($this->numerator, $arg->denominator), gmp_mul($arg->numerator, $this->denominator));
-        
+
         # otherwise, we need to process comparing rounding for both us and the argument
         return gmp_cmp(
-            $this->getRoundedValue($this->numerator, $this->denominator, $decimals = $decimals ?? $this->maxDecimals, $rounding = $rounding ?? $this->rounding), 
+            $this->getRoundedValue($this->numerator, $this->denominator, $decimals = $decimals ?? $this->maxDecimals, $rounding = $rounding ?? $this->rounding),
             $this->getRoundedValue($arg->numerator, $arg->denominator, $decimals, $rounding)
         );
     }
@@ -339,18 +339,18 @@ class LongFloat
                 $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand); # convert to our own type
             }
         }
-        
+
         # if forced rounding is not specified, just compare multiplies of each argument by the remote denominator
         if (($decimals === null) && ($rounding === null))
             return gmp_cmp(gmp_mul($arg->numerator, $this->denominator), gmp_mul($this->numerator, $arg->denominator));
-        
+
         # otherwise, we need to process comparing rounding for both us and the argument
         return gmp_cmp(
             $this->getRoundedValue($arg->numerator, $arg->denominator, $decimals = $decimals ?? $this->maxDecimals, $rounding = $rounding ?? $this->rounding),
             $this->getRoundedValue($this->numerator, $this->denominator, $decimals, $rounding)
         );
     }
-    
+
     public function pow($arg)
     {
         if (!is_integer($arg)) {
@@ -358,13 +358,13 @@ class LongFloat
                 # integer handling is easy, we just take powers of both our numerator and denominator and that is it, the slightly separate handling here is because we need to check for zero and sign
                 if ($arg instanceof \GMP) {
                     # provide integer GMP argument directly as numerator with denominator 1
-                    $numerator = $arg; 
+                    $numerator = $arg;
                     $denominator = 1;
                 } else {
                     $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand);
                 }
             }
-        
+
             if ($arg instanceof LongFloat) {
                 # provide numerator and denominator from the argument
                 $numerator = $arg->numerator;
@@ -393,7 +393,7 @@ class LongFloat
             $this->denominator = 1;
             return $this;
         }
-      
+
         if ($arg == 1) return $this; # anything in power of 1 is unchanged value
 
         if ($arg > 0) {
@@ -416,13 +416,13 @@ class LongFloat
 
         return $this->autoRounding ? $this->checkRound() : ($this->autoCompand ? $this->checkCompand() : $this);
     }
-    
+
     # alias for root(2), all root() implications apply
     public function sqrt()
     {
         return $this->root(2);
     }
-    
+
     # taking root is one of operations that cannot guarantee arbitrary precision, it is always performed at most at maxDecimals+1 precision
     public function root($arg)
     {
@@ -430,13 +430,13 @@ class LongFloat
             if (!$arg instanceof LongFloat) {
                 if ($arg instanceof \GMP) {
                     # provide integer GMP argument directly as numerator with denominator 1
-                    $numerator = $arg; 
+                    $numerator = $arg;
                     $denominator = 1;
                 } else {
                     $arg = new $this($arg, $this->maxDecimals, $this->rounding, $this->autoRounding, $this->autoCompand);
                 }
             }
-        
+
             if ($arg instanceof LongFloat) {
                 # provide numerator and denominator from the argument
                 $numerator = $arg->numerator;
@@ -464,15 +464,15 @@ class LongFloat
         # now take the root of integer
         if ($arg == 0) throw new \RangeException("Taking root of zero power is not possible");
         if ($arg == 1) return $this; # power 1 root of everything is unchanged value
-        
+
         # signs are tricky, if root power is even, negative numbers do not have any roots
         if ((!($arg & 1)) && (gmp_sign($this->numerator) < 0)) throw new \RangeException("Taking even power roots from negative numbers is not possible");
-        
+
         if ($arg > 0) {
             # here is the precision issue, pre-multiply both our numerator and denominator by maxDecimals+1 in the given power to ensure there is no precision loss below maxDecimals
             $this->numerator = gmp_mul($this->numerator, gmp_pow($this::$multipliers[$precision = $this->maxDecimals + 1] ?? $this->getMultiplier($precision), $arg));
             $this->denominator = gmp_mul($this->denominator, gmp_pow($this::$multipliers[$precision], $arg));
-            
+
             if ($arg == 2) {
                 # the square root is optimized
                 $this->numerator = gmp_sqrt($this->numerator);
@@ -519,7 +519,7 @@ class LongFloat
             $this->denominator = 1;
             return $this;
         }
-        
+
         # rounding is also simple: we multiply our numerator by the target precision required * 10, and then divide by existing denominator * 10
         # to see if the rounding is necessary, we compare remainder of the operation to 0 (nothing to round) and then to existing denominator multiplied by 5 to check if we are at the half of the range
         $this->numerator = $this->getRoundedValue($this->numerator, $this->denominator, $decimals = $decimals ?? $this->maxDecimals, $rounding ?? $this->rounding);
@@ -534,7 +534,7 @@ class LongFloat
         # if our denominator is less than or equal to the precision required, we do nothing, otherwise we do the rounding
         return (gmp_cmp($this->denominator, $this::$multipliers[$decimals = $decimals ?? $this->maxDecimals] ?? $this->getMultiplier($decimals)) <= 0) ? $this : $this->round($decimals, $rounding);
     }
-   
+
     public function compand()
     {
         # saves us gcd, cmp and two divs in quite not an improbable case we are zero
@@ -552,13 +552,13 @@ class LongFloat
         }
         return $this;
     }
-    
+
     public function checkCompand()
     {
         # if our denominator is less than or equal to the precision required, we do nothing, otherwise we do the companding
         return (gmp_cmp($this->denominator, $this::$multipliers[$decimals = $decimals ?? $this->maxDecimals] ?? $this->getMultiplier($decimals)) <= 0) ? $this : $this->compand();
     }
-    
+
     # like compare operation, this can operate at specific precision and rounding type if needed
     # if precision or rounding is specified, it will use rounding to the given precision (if only rounding is specified, at our own precision)
     public function isInteger($decimals = null, $rounding = null)
@@ -570,7 +570,7 @@ class LongFloat
                 $this->denominator = 1;
                 return true;
             }
-            
+
             if (!gmp_cmp($this->denominator, 1)) return true;
 
             $gcd = gmp_gcd($this->numerator, $this->denominator);
@@ -587,17 +587,17 @@ class LongFloat
             return !gmp_sign(gmp_div_r($value, $this::$multipliers[$decimals] ?? $this->getMultiplier($decimals)));
         }
     }
-    
+
     public function isZero()
     {
         return !gmp_sign($this->numerator);
     }
-    
+
     public function isPositive()
     {
         return (gmp_sign($this->numerator) > 0);
     }
-    
+
     public function isNegative()
     {
         return (gmp_sign($this->numerator) < 0);
@@ -609,10 +609,10 @@ class LongFloat
         # the same exceptional cases are when we are at zero or integer precision, it saves us the whole run
         if (!gmp_cmp($this->denominator, 1)) return gmp_strval($this->numerator, 10);
         if (!gmp_sign($this->numerator)) return '0';
-       
+
         # do the one-time rounding
         $value = $this->getRoundedValue($this->numerator, $this->denominator, $maxDecimals = $maxDecimals ?? $this->maxDecimals, $rounding ?? $this->rounding);
-        
+
         # print, split and truncate the resulting value
         $str = str_pad(gmp_strval(gmp_abs($value), 10), $maxDecimals + 1, '0', STR_PAD_LEFT);
         return ((gmp_sign($value) < 0) ? '-' : '').substr($str, 0, $intLen = strlen($str) - $maxDecimals).rtrim('.'.substr($str, $intLen), '0.');
@@ -627,7 +627,7 @@ class LongFloat
     {
         return $this->toString();
     }
-    
+
     public function pi()
     {
         # PI calculation (Gauss-Legendre) with current max decimals
@@ -647,7 +647,7 @@ class LongFloat
             $p->mul(2); # p = p * 2
         }
         $a->add($b)->mul($a)->div($t->mul(4)); # approximate PI as (a + b) ^ 2 / (t * 4)
-        
+
         # round and applaud
         return $this->set($a)->round();
     }
@@ -655,19 +655,19 @@ class LongFloat
     # this one gets rounded numerator value for specific decimal precision and rounding
     protected function getRoundedValue($numerator, $denominator, $decimals, $rounding)
     {
-        list($numerator, $remainder) = gmp_div_qr(gmp_mul($numerator, $this::$multipliers[$precision = $decimals + 1] ?? $this->getMultiplier($precision)), gmp_mul($denominator, 10), GMP_ROUND_ZERO);
+        list($value, $remainder) = gmp_div_qr(gmp_mul($numerator, $this::$multipliers[$precision = $decimals + 1] ?? $this->getMultiplier($precision)), gmp_mul($denominator, 10), GMP_ROUND_ZERO);
         if (gmp_sign($remainder = gmp_abs($remainder))) {
             switch ($rounding) {
                 case $this::ROUND_MATH: $add = (gmp_cmp($remainder, gmp_mul($denominator, 5)) >= 0) ? ((gmp_sign($numerator) >= 0) ? 1 : -1) : null; break;
-                case $this::ROUND_TRUNC: $add = null; break;
                 case $this::ROUND_FLOOR: $add = (gmp_sign($numerator) >= 0) ? null : -1; break;
                 case $this::ROUND_CEIL: $add = (gmp_sign($numerator) >= 0) ? 1 : null; break;
+                case $this::ROUND_TRUNC: $add = null; break;
                 case $this::ROUND_SPREAD: $add = (gmp_sign($numerator) >= 0) ? 1 : -1; break;
                 default: $add = (gmp_cmp($remainder, gmp_mul($denominator, 5)) >= 0) ? ((gmp_sign($numerator) >= 0) ? 1 : -1) : null; break;
             }
-            if ($add !== null) return gmp_add($numerator, $add); # compensate if necessary
+            if ($add !== null) return gmp_add($value, $add); # compensate if necessary
         }
-        return $numerator;
+        return $value;
     }
 
     protected function getMultiplier($decimals)
@@ -690,9 +690,9 @@ class LongFloat
 
         switch ($this->rounding) {
             case $this::ROUND_MATH: $out['rounding'] = 'MATH'; break;
-            case $this::ROUND_TRUNC: $out['rounding'] = 'TRUNC'; break;
             case $this::ROUND_FLOOR: $out['rounding'] = 'FLOOR'; break;
             case $this::ROUND_CEIL: $out['rounding'] = 'CEIL'; break;
+            case $this::ROUND_TRUNC: $out['rounding'] = 'TRUNC'; break;
             case $this::ROUND_SPREAD: $out['rounding'] = 'SPREAD'; break;
         }
 
