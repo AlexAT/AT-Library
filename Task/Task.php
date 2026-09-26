@@ -47,7 +47,7 @@ interface ITask
 
     # Simplified control API aliases, start() also uses default task loop if not specified
 
-    public function start(...$parameters);
+    public function start(...$parameters); # start([optional parent Task/TaskLoop,] ...$parameters)
     public function startOn($taskOrTaskLoop = null, ...$parameters);
     public function wake($throwIfNotRunning = false);
     public function kill($throwIfNotRunning = false);
