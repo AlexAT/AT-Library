@@ -56,7 +56,6 @@ trait TWaitOn
 
     protected function addMonitoredTasks()
     {
-        $this->waitMonitoredTasksMap = [];
         foreach ($this->waitMonitoredTasks as $taskId => $taskObject) {
             if ($taskObject->taskRunning()) {
                 $taskObject->taskAddOnTerminateHandler([$this, 'terminateMonitor'], $this->taskId);

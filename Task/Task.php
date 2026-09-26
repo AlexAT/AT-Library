@@ -45,6 +45,18 @@ interface ITask
 
     const taskAllowClosureAndObjectHandlers = false; # inherit and set to true to allow obscure Task variants like non-generator closures and objects with taskStart()/taskRun()/taskFinish() methods
 
+    # Simplified control API aliases, start() also uses default task loop if not specified
+
+    public function start(...$parameters);
+    public function startOn($taskOrTaskLoop = null, ...$parameters);
+    public function wake($throwIfNotRunning = false);
+    public function kill($throwIfNotRunning = false);
+
+    # Virtual task implementation API
+
+    # public function main(...$parameters); # provide main() generator function in child object to run as Generator-based task
+    # public function fiber(...$parameters); # provide fiber() function in child object to run run as Fiber-based task
+
     # Task control API
 
     public function taskAddTo(/** @var \ATL\TaskLoop */ $taskLoop, ...$parameters);
@@ -142,7 +154,7 @@ trait TTask
 
     # Task object construction
 
-    # default constructor
+    # default constructor, can be overridden in child objects to provide specific parameter sets
     public function __construct($handler = null, ...$parameters)
     {
         $this->tlConstructTask($handler, $parameters); # call real hidden constructor
@@ -164,12 +176,12 @@ trait TTask
             # general easy way to create task objects is to just declare main() as Generator function or fiber() as Fiber function and it will be used as task handler
             if (method_exists($this, 'main')) {
                 $handler = \ATL\Routines::callableToClosure([$this, 'main'], true);
-                if (!(new \ReflectionFunction($handler))->isGenerator()) throw new \ATL\TaskException("Task main() routine must be a generator function");
+                if (!(new \ReflectionFunction($handler))->isGenerator()) throw new \ATL\TaskLoopException("Task main() routine must be a generator function");
             } elseif ((PHP_VERSION_ID >= 80100) && method_exists($this, 'fiber')) {
                 $handler = new \Fiber([$this, 'fiber']);
             }
         }
-        if (($handler !== null) && !is_object($handler) && !is_callable($handler)) throw new \ATL\TaskException("Attempted to create task with unsupported handler type");
+        if (($handler !== null) && !is_object($handler) && !is_callable($handler)) throw new \ATL\TaskLoopException("Attempted to create task with unsupported handler type");
         $this->tlTaskHandler = $handler;
     }
 
@@ -191,6 +203,26 @@ trait TTask
     # Task overrides that are handled by Task to provide per-task parameters for tasks and subtasks instead of user defined ones when replacing active task handler by ourselves
     # You can override these in your child Task objects or object-handled tasks to provide some defaults for your task, just the method presence incurs override
 
+    # Simplified control API
+
+    public function start(...$parameters)
+    {
+        return $this->startOn(null, ...$parameters);
+    }
+
+    public function startOn($parent = null, ...$parameters)
+    {
+        if ($this->taskRunning()) throw new \ATL\TaskException("Tried to run task that is already running");
+        if ($parent === null) $parent = TaskLoop::getDefaultTaskLoop();
+        if ($parent instanceof \ATL\ITaskLoop) {
+            return $this->taskAddTo($parent, ...$parameters);
+        } elseif ($parent instanceof \ATL\ITask) {
+            return $parent->taskAddChildTask($this, ...$parameters);
+        } else throw new \ATL\TaskException('Attempted to start task with parent that is not a TaskLoop and not a Task either');
+    }
+    public function wake($throwIfNotRunning = false) { return $this->taskSchedule($throwIfNotRunning); }
+    public function kill($throwIfNotRunning = false) { return $this->taskTerminate($throwIfNotRunning); }
+
     # Task control API
 
     public function taskAddTo(/** @var \ATL\TaskLoop */ $taskLoop, ...$parameters)
@@ -200,7 +232,7 @@ trait TTask
 
     /** @return \ATL\Task */ public function taskAddChildTask($task, ...$parameters)
     {
-        if ($this->taskLoop === null) throw new \ATL\TaskLoopException("Tried to add child task while not being added to any task loop ourselves");
+        if ($this->taskLoop === null) throw new \ATL\TaskException("Tried to add child task while not being added to any task loop ourselves");
         /** @var \ATL\Task */ $task = $this->taskLoop->addTask($task, ...$parameters);
         $this->taskBindTask($task);
         return $task;
@@ -213,37 +245,37 @@ trait TTask
 
     public function taskScheduled($throwIfNotExists = false)
     {
-        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskLoopException("Tried to get scheduling status for task that is not added to any task loop");
+        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskException("Tried to get scheduling status for task that is not added to any task loop");
         return ($this->taskLoop !== null) ? $this->taskLoop->isTaskScheduled($this, $throwIfNotExists) : false;
     }
 
     public function taskActive($throwIfNotExists = false)
     {
-        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskLoopException("Tried to get active status for task that is not added to any task loop");
+        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskException("Tried to get active status for task that is not added to any task loop");
         return ($this->taskLoop !== null) ? $this->taskLoop->isTaskActive($this, $throwIfNotExists) : false;
     }
 
     public function taskWaiting($throwIfNotExists = false)
     {
-        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskLoopException("Tried to get waiting status for task that is not added to any task loop");
+        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskException("Tried to get waiting status for task that is not added to any task loop");
         return ($this->taskLoop !== null) ? $this->taskLoop->isTaskWaiting($this, $throwIfNotExists) : false;
     }
 
     public function taskSchedule($throwIfNotExists = false)
     {
-        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskLoopException("Tried to schedule task that is not added to any task loop");
+        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskException("Tried to schedule task that is not added to any task loop");
         return ($this->taskLoop !== null) ? $this->taskLoop->scheduleTask($this, $throwIfNotExists) : false;
     }
 
     public function taskTerminate($throwIfNotExists = false)
     {
-        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskLoopException("Tried to terminate task that is not added to any task loop");
+        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskException("Tried to terminate task that is not added to any task loop");
         return ($this->taskLoop !== null) ? $this->taskLoop->terminateTask($this, $throwIfNotExists) : false;
     }
 
     public function taskTerminateStack($throwIfNotExists = false)
     {
-        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskLoopException("Tried to terminate task stack for task that is not added to any task loop");
+        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskException("Tried to terminate task stack for task that is not added to any task loop");
         return ($this->taskLoop !== null) ? $this->taskLoop->terminateTaskStack($this, $throwIfNotExists) : false;
     }
 
@@ -264,13 +296,13 @@ trait TTask
 
     public function taskAddOnTerminateHandler($handler, $handlerId = null, $throwIfNotExists = false)
     {
-        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskLoopException("Tried to add onTerminate handler to task that is not added to any task loop");
+        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskException("Tried to add onTerminate handler to task that is not added to any task loop");
         return ($this->taskLoop !== null) ? $this->taskLoop->addTaskOnTerminateHandler($this, $handler, $handlerId, $throwIfNotExists) : $this->tlTaskAddOnTerminateHandler($handler, $handlerId);
     }
 
     public function taskRemoveOnTerminateHandler($handlerId, $throwIfNotExists = false)
     {
-        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskLoopException("Tried to add onTerminate handler to task that is not added to any task loop");
+        if ($throwIfNotExists && ($this->taskLoop === null)) throw new \ATL\TaskException("Tried to add onTerminate handler to task that is not added to any task loop");
         return ($this->taskLoop !== null) ? $this->taskLoop->removeTaskOnTerminateHandler($this, $handlerId, $throwIfNotExists) : $this->tlTaskRemoveOnTerminateHandler($handlerId, $throwIfNotExists);
     }
 
@@ -303,7 +335,7 @@ trait TTask
     public function tlTaskSetOptions($options)
     {
         if ($options === null) return;
-        if (!is_array($options)) throw new \ATL\TaskException("Task options must be an array");
+        if (!is_array($options)) throw new \ATL\TaskLoopException("Task options must be an array");
         if (isset($options['precise'])) $this->tlTaskSetPrecise($options['precise']);
         if (isset($options['onTerminate']) && is_array($options['onTerminate']))
             foreach ($options['onTerminate'] as $handlerId => $handler)
@@ -332,7 +364,7 @@ trait TTask
             do { $handlerId = $this->taskId.':'.mt_rand(0, PHP_INT_MAX); } while (isset($this->tlTaskOnTerminateHandlers[$handlerId]) || isset($this->tlActiveTaskOnTerminateHandlers[$handlerId]));
         }
         if (($handlerId !== null) && (isset($this->tlTaskOnTerminateHandlers[$handlerId]) || isset($this->tlActiveTaskOnTerminateHandlers[$handlerId])))
-            throw new \ATL\TaskException("Attempted to add onTerminate handler with duplicate ID of `{$handlerId}`");
+            throw new \ATL\TaskLoopException("Attempted to add onTerminate handler with duplicate ID of `{$handlerId}`");
         $this->tlTaskOnTerminateHandlers[$handlerId] = \ATL\Routines::callableToClosure($handler, true);
         $this->tlActiveTaskOnTerminateHandlers[$handlerId] = \ATL\Routines::callableToClosure($handler, true);
         return $handlerId;
@@ -341,7 +373,7 @@ trait TTask
     # removes specific onTerminate handler, does nothing if it does not exist
     public function tlTaskRemoveOnTerminateHandler($handlerId, $throwIfNotExists = false)
     {
-        if ($throwIfNotExists && !isset($this->tlTaskOnTerminateHandlers[$handlerId])) throw new \ATL\TaskException("Tried to remove onTerminate handler `{$handlerId}` that does not exist");
+        if ($throwIfNotExists && !isset($this->tlTaskOnTerminateHandlers[$handlerId])) throw new \ATL\TaskLoopException("Tried to remove onTerminate handler `{$handlerId}` that does not exist");
         unset($this->tlTaskOnTerminateHandlers[$handlerId], $this->tlActiveTaskOnTerminateHandlers[$handlerId]);
     }
 

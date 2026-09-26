@@ -119,6 +119,8 @@ interface ITaskLoop
     public static function runLoop(/** @var \ATL\Task[] */ ...$tasks);
     public static function runTask(/** @var \ATL\Task */ $task);
     public static function createInfiniteLoop(/** @var \ATL\Task[] */ ...$tasks);
+    public static function getDefaultTaskLoop(/** @var \ATL\Task[] */ ...$tasks);
+    public static function startDefaultTaskLoop(/** @var \ATL\Task[] */ ...$tasks);
 
     # Task exception handler, can be used to log task exceptions
 
@@ -428,7 +430,7 @@ trait TTaskLoop
         # return task object
         return $handler;
     }
-    
+
     # quickly adds multiple tasks with no parameters
     public function addTasks(...$tasks)
     {
@@ -683,13 +685,19 @@ trait TTaskLoop
         $loop->taskLoopTerminateOnNoTasks = false;
         return $loop;
     }
-    
+
     # default TaskLoop instance
-    public static function getDefaultTaskLoop(...$tasks)
+
+    public static function getDefaultTaskLoop(/** @var \ATL\Task[] */ ...$tasks)
     {
         $taskLoop = \ATL\ObjectRegistry::getInstance('\\ATL\\Default\\TaskLoop', false, static::class);
-        if (!empty($tasks)) $taskLoop->addTasks($tasks);
+        if (!empty($tasks)) $taskLoop->addTasks(...$tasks);
         return $taskLoop;
+    }
+
+    public static function startDefaultTaskLoop(/** @var \ATL\Task[] */ ...$tasks)
+    {
+        return (static::getDefaultTaskLoop(...$tasks))->loop();
     }
 }
 
