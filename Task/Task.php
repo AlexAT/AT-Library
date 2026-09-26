@@ -207,7 +207,7 @@ trait TTask
 
     public function start(...$parameters)
     {
-        return $this->startOn(null, ...$parameters);
+        return (isset($parameters[0]) && (($parameters[0] instanceof \ATL\ITaskLoop) || ($parameters[0] instanceof \ATL\ITask))) ? $this->startOn(...$parameters) : $this->startOn(null, ...$parameters);
     }
 
     public function startOn($parent = null, ...$parameters)
