@@ -38,25 +38,22 @@ trait TEventHandlers
     public function addEventHandler($owner, $handler, $callback, $runHandler = true, $addLast = false)
     {
         if (is_object($owner)) $owner = spl_object_id($owner);
-        unset($this->ehEventHandlers[$handler][$owner]); # remove existing handler
         if ($callback !== null) {
             # add handler first
             if ($this->ehEventHandlerUseClosure[$handler] ?? true)
                 $callback = \ATL\Routines::callableToClosure($callback, true);
             if (!isset($this->ehEventHandlers[$handler]) || $addLast) {
                 # first time addition or adding last is optimized, so in case there is only one handler, it is all easy
+                unset($this->ehEventHandlers[$handler][$owner]); # remove existing handler if it exists
                 $this->ehEventHandlers[$handler][$owner] = $callback;
             } else {
                 # handler list exists, and we need to add first, alas, PHP only gets us out with very slow method of addition
-                # we should not have big callback sequences though, so this is tolerable for now I think
-                $currentHandlers = $this->ehEventHandlers[$handler];
-                $this->ehEventHandlers[$handler] = [$owner => $callback];
-                $target = &$this->ehEventHandlers[$handler];
-                foreach ($currentHandlers as $hOwner => $hCallback)
-                    $target[$hOwner] = $hCallback;
+                # nothing has huge callback sequences normally, so this is tolerable for now and is not worth optimizing
+                $currentHandlers = [$owner => $callback] + $this->ehEventHandlers[$handler]; # this automatically removes existing handler from the right side
             }
             $this->ehOnEventHandlerAdd($owner, $handler, $callback, $runHandler); # notify about new handler and possibly invoke handler for the first time
         } else {
+            unset($this->ehEventHandlers[$handler][$owner]); # remove existing handler if it exists
             if (empty($this->ehEventHandlers[$handler])) unset($this->ehEventHandlers[$handler]); # remove empty handler set
             $this->ehOnEventHandlerRemove($owner, $handler);
         }
@@ -151,7 +148,7 @@ trait TEventHandlers
     protected function ehInvokeEventHandlers($handler, ...$args)
     {
         foreach ($this->ehEventHandlers[$handler] ?? [] as $handler)
-            if (($handler)(...$args) === false) break;
+            if (($handler)(...$args) === false) break; # getting false from some handler allows us to stop calling the chain further
     }
 
     # addEventHandlers internally calls ehOnEventHandlerAdd($owner, $handler, $callback, $runHandler) when handlers are added

@@ -672,7 +672,7 @@ class LongFloat
 
     protected function getMultiplier($decimals)
     {
-        if (($multiplier = ($this::$multipliers[$decimals] ?? null)) !== null) return $multiplier;
+        if (($multiplier = $this::$multipliers[$decimals] ?? null) !== null) return $multiplier;
         return $this::$multipliers[$decimals] = ($decimals <= 18) ? pow(10, $decimals) : gmp_pow(10, $decimals); # initialize new decimal multiplier, integer for <10E18 (64-bit)
     }
 
