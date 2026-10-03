@@ -57,7 +57,7 @@ namespace ATL\Sockets;
 #     invoked when transport asks to close the buffer, this normally happens after transport closed corresponding end of the socket and polling, also can be triggered by transport without notice if i.e. transport host closed some side of the socket or error happens
 #     read buffer example: transport requests to close the buffer, socket catches the event and invokes its own readClosed event, then disconnected event when all buffers are closed
 #     write buffer example: transport requests to close the buffer, socket catches the event and invokes its own writeClosed event, then disconnected event when all buffers are closed
-# - error($buffer, $errorCode, $errorSubCode, $errorText)
+# - error($buffer, $errorCode, $errorSubCode, $errorText, $fatal)
 #     this event is invoked when socket buffer encounters an error during the operations, but it exists only to provide error code/message and should not cause immediate socket aborts
 #     if the error is fatal, this event is to be accompanied with closed/abort events by using skbAbort(), normally all handled by socket side only to register buffer errors
 #     code is normally one of SKB_ERROR constants, while subcode can be i.e. operating system error code encountered, also take care the base buffer implementation provides no error messaging
@@ -741,18 +741,32 @@ class BufferPrototype implements \ATL\IEventHandlers { use \ATL\TEventHandlers; 
 class Buffer extends BufferPrototype implements IBuffer { use TBuffer; }
 
 ########
-# here the very base capability set based buffer classes go
+# the very base capability set based read buffer classes
 
-class BaseBuffer extends Buffer implements IBufferBaseCapability { use TBufferBaseCapability; }
-class BulkBuffer extends BaseBuffer implements IBufferBulkCapability { use TBufferBulkCapability; }
+class BaseReadBuffer extends Buffer implements IBufferBaseReadCapability { use TBufferBaseReadCapability; }
+class BulkReadBuffer extends BaseReadBuffer implements IBufferBulkReadCapability { use TBufferBulkReadCapability; }
 
-class ByteBuffer extends BaseBuffer implements IBufferByteSizeCapability { use TBufferByteSizeCapability; }
-class ByteBulkBuffer extends ByteBuffer implements IBufferBulkCapability { use TBufferBulkCapability; }
-class ByteBulkStringBuffer extends ByteBulkBuffer implements IBufferBulkStringReadCapability { use TBufferBulkStringReadCapability; }
-class ByteReadBulkStringBuffer extends ByteBulkStringBuffer implements IBufferByteReadCapability { use TBufferByteReadCapability; }
-class ByteReadBulkStringDelimitedBuffer extends ByteReadBulkStringBuffer implements IBufferDelimitedReadCapability { use TBufferDelimitedReadCapability; }
+class ByteReadBuffer extends BaseReadBuffer implements IBufferByteSizeCapability { use TBufferByteSizeCapability; }
+class ByteBulkReadBuffer extends ByteReadBuffer implements IBufferBulkReadCapability { use TBufferBulkReadCapability; }
+class ByteBulkStringReadBuffer extends ByteBulkReadBuffer implements IBufferBulkStringReadCapability { use TBufferBulkStringReadCapability; }
+class BytewiseBulkStringReadBuffer extends ByteBulkStringReadBuffer implements IBufferByteReadCapability { use TBufferByteReadCapability; }
+class BytewiseBulkStringDelimitedReadBuffer extends BytewiseBulkStringReadBuffer implements IBufferDelimitedReadCapability { use TBufferDelimitedReadCapability; }
 
-class MessageBuffer extends BulkBuffer implements IBufferMessageCapability { }
-class DatagramBuffer extends ByteBulkBuffer implements IBufferDatagramCapability { }
-class ByteStreamBuffer extends ByteReadBulkStringDelimitedBuffer implements IBufferStreamCapability { }
-class MixedStreamBuffer extends ByteReadBulkStringDelimitedBuffer implements IBufferStreamCapability, IBufferMixedStreamCapability { }
+class MessageReadBuffer extends BulkReadBuffer implements IBufferMessageCapability { }
+class DatagramReadBuffer extends ByteBulkReadBuffer implements IBufferDatagramCapability { }
+class ByteStreamReadBuffer extends BytewiseBulkStringDelimitedReadBuffer implements IBufferStreamCapability { }
+class MixedStreamReadBuffer extends BytewiseBulkStringDelimitedReadBuffer implements IBufferStreamCapability, IBufferMixedStreamCapability { }
+
+########
+# the very base capability set based write buffer classes
+
+class BaseWriteBuffer extends Buffer implements IBufferBaseWriteCapability { use TBufferBaseWriteCapability; }
+class BulkWriteBuffer extends BaseWriteBuffer implements IBufferBulkWriteCapability { use TBufferBulkWriteCapability; }
+
+class ByteWriteBuffer extends BaseWriteBuffer implements IBufferByteSizeCapability { use TBufferByteSizeCapability; }
+class ByteBulkWriteBuffer extends ByteWriteBuffer implements IBufferBulkWriteCapability { use TBufferBulkWriteCapability; }
+
+class MessageWriteBuffer extends BulkWriteBuffer implements IBufferMessageCapability { }
+class DatagramWriteBuffer extends ByteBulkWriteBuffer implements IBufferDatagramCapability { }
+class ByteStreamWriteBuffer extends ByteBulkWriteBuffer implements IBufferStreamCapability { }
+class MixedStreamWriteBuffer extends ByteBulkWriteBuffer implements IBufferStreamCapability, IBufferMixedStreamCapability { }

@@ -8,17 +8,16 @@ namespace ATL\Sockets;
 
 ########
 # the very basic message/datagram buffer capability
-# provides base read(), write(), peek(), returnRead()
+# provides base read(), peek(), returnRead()
 
-interface IBufferBaseCapability
+interface IBufferBaseReadCapability
 {
     public function read(); # reads and removes single data block from the buffer (socket side)
-    public function write($data); # writes single data block to the buffer (socket side)
     public function peek(); # peeks single data block from the buffer (socket side)
     public function returnRead($data); # returns single data block to the buffer to be read first, an opposite of read() (socket side)
 }
 
-trait TBufferBaseCapability
+trait TBufferBaseReadCapability
 {
     public function read()
     {
@@ -29,13 +28,6 @@ trait TBufferBaseCapability
         }
 
         return $this->skbPopLeft();
-    }
-
-    public function write($data)
-    {
-        if (!$this->isWriteable()) return false; # writing to not open or closed buffer is a bad idea
-        $this->skbAddRight($data);
-        return true;
     }
 
     public function peek()
@@ -51,10 +43,29 @@ trait TBufferBaseCapability
 }
 
 ########
+# the very basic message/datagram write buffer capability
+# provides base write()
+
+interface IBufferBaseWriteCapability
+{
+    public function write($data); # writes single data block to the buffer (socket side)
+}
+
+trait TBufferBaseWriteCapability
+{
+    public function write($data)
+    {
+        if (!$this->isWriteable()) return false; # writing to not open or closed buffer is a bad idea
+        $this->skbAddRight($data);
+        return true;
+    }
+}
+
+########
 # byte size buffer capability maintains byte size inside the buffer instead of message-based count
 # take care that writing and returning nulls to byte-based buffers is not allowed
 
-interface IBufferByteSizeCapability extends IBufferBaseCapability
+interface IBufferByteSizeCapability
 {
     const SKB_PARAM_BLOCK_SIZE = 0x2100; # suggested maximum block size to be read or written into the buffer at once (transport side)
 }
@@ -109,18 +120,17 @@ trait TBufferFlushCapability
 }
 
 ########
-# bulk capability provides readBulk(), writeBulk(), peekBulk() and returnReadBulk(), reads always return an array, empty array if there is nothing to read
-# technically should be applicable for every socket buffer as base capability, but placed here just in case and because it's slightly more complex than normal operations
+# bulk read capability provides readBulk(), peekBulk() and returnReadBulk(), reads always return an array, empty array if there is nothing to read
+# technically should be applicable for every socket read buffer as base capability, but placed here just in case and because it's slightly more complex than normal operations
 
-interface IBufferBulkCapability extends IBufferBaseCapability
+interface IBufferBulkReadCapability extends IBufferBaseReadCapability
 {
     public function readBulk($maxReadCount = PHP_INT_MAX); # reads and removes up to maxReadCount data blocks from the buffer (socket side)
-    public function writeBulk($dataSet); # writes an array of data blocks to the buffer (socket side)
     public function peekBulk($maxReadCount = PHP_INT_MAX); # peeks up to maxReadCount data blocks from the buffer (socket side)
     public function returnReadBulk($dataSet); # returns an array of data blocks to the buffer to be read, an opposite of readBulk(), the first element will be read first again (socket side)
 }
 
-trait TBufferBulkCapability
+trait TBufferBulkReadCapability
 {
     public function readBulk($maxReadCount = PHP_INT_MAX)
     {
@@ -141,19 +151,6 @@ trait TBufferBulkCapability
         }
         $this->skbSizeRemoved(count($read), $readSize, false, $this::SKB_SIZE_OPERATION_POP_LEFT);
         return $read;
-    }
-
-    public function writeBulk($dataSet)
-    {
-        if (!$this->isWriteable()) return false; # writing to not open or closed buffer is a bad idea
-
-        $writeSize = 0;
-        foreach ($dataSet as $data) {
-            $writeSize += $this->skbGetDataSize($data);
-            $this->skbAddRight($data, true, true);
-        }
-        $this->skbSizeAdded(count($dataSet), $writeSize, false, $this::SKB_SIZE_OPERATION_ADD_RIGHT);
-        return true;
     }
 
     public function peekBulk($maxReadCount = PHP_INT_MAX)
@@ -184,9 +181,34 @@ trait TBufferBulkCapability
 }
 
 ########
+# bulk write capability provides writeBulk()
+# technically should be applicable for every socket write buffer as base capability, but placed here just in case and because it's slightly more complex than normal operations
+
+interface IBufferBulkWriteCapability extends IBufferBaseWriteCapability
+{
+    public function writeBulk($dataSet); # writes an array of data blocks to the buffer (socket side)
+}
+
+trait TBufferBulkWriteCapability
+{
+    public function writeBulk($dataSet)
+    {
+        if (!$this->isWriteable()) return false; # writing to not open or closed buffer is a bad idea
+
+        $writeSize = 0;
+        foreach ($dataSet as $data) {
+            $writeSize += $this->skbGetDataSize($data);
+            $this->skbAddRight($data, true, true);
+        }
+        $this->skbSizeAdded(count($dataSet), $writeSize, false, $this::SKB_SIZE_OPERATION_ADD_RIGHT);
+        return true;
+    }
+}
+
+########
 # bulk string read capability provides readBulkString() and peekBulkString() like bulk capability, reads normally return string (empty string if there is nothing to read), but can also return false if the read is impossible
 
-interface IBufferBulkStringReadCapability extends IBufferBaseCapability, IBufferBulkCapability
+interface IBufferBulkStringReadCapability extends IBufferBaseReadCapability, IBufferBulkReadCapability
 {
     public function readBulkString($maxReadCount = PHP_INT_MAX, $throwOnImpossibleRead = false); # reads and removes up to maxReadCount data blocks from the buffer, returning result as concatenated string (socket side)
     public function peekBulkString($maxReadCount = PHP_INT_MAX, $throwOnImpossibleRead = false); # peeks up to maxReadCount data blocks from the buffer, returning result as concatenated string (socket side)
@@ -231,7 +253,7 @@ trait TBufferBulkStringReadCapability
 # byte read capability provides readBytes(), requires buffer to be byte-sized, normally returns some string (empty string if there is nothing to read)
 # take care that when using mixed buffers (IBufferMixedStreamCapability), readBytes can either return false or throw a ReadException when not enough bytes are available until the first non-stringable / non-sizable object, depending on throwOnImpossibleRead flag
 
-interface IBufferByteReadCapability extends IBufferBaseCapability, IBufferByteSizeCapability
+interface IBufferByteReadCapability extends IBufferBaseReadCapability, IBufferByteSizeCapability
 {
     public function readBytes($count, $exact = false, $throwOnImpossibleRead = false); # reads up to or exactly count bytes from the buffer, returns empty string if there is nothing to read or not enough bytes to read (socket side)
 }
@@ -312,7 +334,7 @@ trait TBufferByteReadCapability
 # take care delimited normally return delimiter encountered at the end of the string, except if maximum read length is reached (and this can also happen to be mid-delimiter in the corner case)
 # the bulk read is actually not optimized at all as the bulk read routine is already very complex and just calls readDelimited in sequence until it can read nothing more, but it is here for convenience
 
-interface IBufferDelimitedReadCapability extends IBufferBaseCapability, IBufferBulkCapability, IBufferByteReadCapability
+interface IBufferDelimitedReadCapability extends IBufferBaseReadCapability, IBufferBulkReadCapability, IBufferByteReadCapability
 {
     public function setDelimiter($delimiter); # sets the delimiter to split delimited reads from the buffer by (socket side)
     public function readDelimited($maxLineLength = PHP_INT_MAX, $throwOnImpossibleRead = false); # reads next string up to delimiter or maxLineLength bytes, the delimiter is also returned in result if encountered (socket side)
