@@ -399,6 +399,7 @@ trait TBuffer
     # avoid overriding this one unless absolutely necessary
     protected function skbDataAdded($data, $silent, $operationHint = null)
     {
+        if (is_bool($data)) throw new \UnexpectedValueException('Attempted to operate on boolean data block in socket buffer'); # we cannot operate on booleans
         return $this->skbSizeAdded(1, $this->skbGetDataSize($data), $silent, $operationHint);
     }
 

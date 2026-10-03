@@ -12,10 +12,10 @@ namespace ATL\Sockets;
 
 interface IBufferBaseCapability
 {
-    public function read();
-    public function write($data);
-    public function peek();
-    public function returnRead($data);
+    public function read(); # reads and removes single data block from the buffer (socket side)
+    public function write($data); # writes single data block to the buffer (socket side)
+    public function peek(); # peeks single data block from the buffer (socket side)
+    public function returnRead($data); # returns single data block to the buffer to be read first, an opposite of read() (socket side)
 }
 
 trait TBufferBaseCapability
@@ -56,11 +56,13 @@ trait TBufferBaseCapability
 
 interface IBufferByteSizeCapability extends IBufferBaseCapability
 {
-    const SKB_PARAM_BLOCK_SIZE = 0x2100;
+    const SKB_PARAM_BLOCK_SIZE = 0x2100; # suggested maximum block size to be read or written into the buffer at once (transport side)
 }
 
 trait TBufferByteSizeCapability
 {
+    public $skbBlockSize; # suggested maximum block size to be read or written into the buffer at once
+
     protected function skbInitializeDefaults()
     {
         parent::skbInitializeDefaults();
@@ -72,20 +74,14 @@ trait TBufferByteSizeCapability
         $this->skbExtendSizeBy = 65536;
     }
 
-    public function write($data)
+    protected function skbReadParameters()
     {
-        if ($data === null) throw new \UnexpectedValueException('Attempted to write null to the byte-sized socket buffer'); # cannot add nulls to the byte buffer
-        return parent::write($data);
-    }
-
-    public function returnRead($data)
-    {
-        if ($data === null) throw new \UnexpectedValueException('Attempted to return null read to the byte-sized socket buffer'); # cannot add nulls to the byte buffer
-        return parent::returnRead($data);
+        $this->skbBlockSize = $this->skbParameters[$this::SKB_PARAM_BLOCK_SIZE] ?? $this->skbBlockSize;
     }
 
     protected function skbGetDataSize($data)
     {
+        if ($data === null) throw new \UnexpectedValueException('Attempted to operate on null data block in the byte-sized socket buffer'); # cannot use nulls in the byte buffer
         if (is_scalar($data)) return strlen($data); # strings and other scalars are just string byte count in size
         if ($data instanceof \ATL\Sockets\SizableByteBufferObject) return $data->skboGetSize(); # sizable byte buffer objects can get us their own size
         return 0; # anything not sizable does not count against the buffer size
@@ -97,9 +93,9 @@ trait TBufferByteSizeCapability
 
 interface IBufferFlushCapability
 {
-    const SKB_EVENT_FLUSH = 0x0100;
+    const SKB_EVENT_FLUSH = 0x0100; # called when urgent buffer flush is requested (normally handled transport side)
 
-    public function flush();
+    public function flush(); # called to request buffer to flush the data urgently (socket side)
 }
 
 trait TBufferFlushCapability
@@ -118,10 +114,10 @@ trait TBufferFlushCapability
 
 interface IBufferBulkCapability extends IBufferBaseCapability
 {
-    public function readBulk($maxReadCount = PHP_INT_MAX);
-    public function writeBulk($dataSet);
-    public function peekBulk($maxReadCount = PHP_INT_MAX);
-    public function returnReadBulk($dataSet);
+    public function readBulk($maxReadCount = PHP_INT_MAX); # reads and removes up to maxReadCount data blocks from the buffer (socket side)
+    public function writeBulk($dataSet); # writes an array of data blocks to the buffer (socket side)
+    public function peekBulk($maxReadCount = PHP_INT_MAX); # peeks up to maxReadCount data blocks from the buffer (socket side)
+    public function returnReadBulk($dataSet); # returns an array of data blocks to the buffer to be read, an opposite of readBulk(), the first element will be read first again (socket side)
 }
 
 trait TBufferBulkCapability
@@ -176,11 +172,13 @@ trait TBufferBulkCapability
     public function returnReadBulk($dataSet)
     {
         $returnSize = 0;
-        foreach ($dataSet as $data) {
+        $data = end($dataSet);
+        while ($data !== false) {
             $returnSize += $this->skbGetDataSize($data);
             $this->skbAddLeft($data, true, true);
+            $data = prev($dataSet);
         }
-        $this->skbSizeAdded(count($dataSet), $writeSize, false, $this::SKB_SIZE_OPERATION_ADD_LEFT);
+        $this->skbSizeAdded(count($dataSet), $returnSize, false, $this::SKB_SIZE_OPERATION_ADD_LEFT);
         return true;
     }
 }
@@ -190,8 +188,8 @@ trait TBufferBulkCapability
 
 interface IBufferBulkStringReadCapability extends IBufferBaseCapability, IBufferBulkCapability
 {
-    public function readBulkString($maxReadCount = PHP_INT_MAX, $throwOnImpossibleRead = false);
-    public function peekBulkString($maxReadCount = PHP_INT_MAX, $throwOnImpossibleRead = false);
+    public function readBulkString($maxReadCount = PHP_INT_MAX, $throwOnImpossibleRead = false); # reads and removes up to maxReadCount data blocks from the buffer, returning result as concatenated string (socket side)
+    public function peekBulkString($maxReadCount = PHP_INT_MAX, $throwOnImpossibleRead = false); # peeks up to maxReadCount data blocks from the buffer, returning result as concatenated string (socket side)
 }
 
 trait TBufferBulkStringReadCapability
@@ -235,7 +233,7 @@ trait TBufferBulkStringReadCapability
 
 interface IBufferByteReadCapability extends IBufferBaseCapability, IBufferByteSizeCapability
 {
-    public function readBytes($count, $exact = false, $throwOnImpossibleRead = false);
+    public function readBytes($count, $exact = false, $throwOnImpossibleRead = false); # reads up to or exactly count bytes from the buffer, returns empty string if there is nothing to read or not enough bytes to read (socket side)
 }
 
 trait TBufferByteReadCapability
@@ -316,10 +314,11 @@ trait TBufferByteReadCapability
 
 interface IBufferDelimitedReadCapability extends IBufferBaseCapability, IBufferBulkCapability, IBufferByteReadCapability
 {
-    public function setDelimiter($delimiter);
-    public function skbDelimitedReadScanReset();
-    public function readDelimited($maxLineLength = PHP_INT_MAX, $throwOnImpossibleRead = false);
-    public function readDelimitedBulk($maxLineLength = PHP_INT_MAX, $maxReadCount = PHP_INT_MAX, $throwOnImpossibleRead = false);
+    public function setDelimiter($delimiter); # sets the delimiter to split delimited reads from the buffer by (socket side)
+    public function readDelimited($maxLineLength = PHP_INT_MAX, $throwOnImpossibleRead = false); # reads next string up to delimiter or maxLineLength bytes, the delimiter is also returned in result if encountered (socket side)
+    public function readDelimitedBulk($maxLineLength = PHP_INT_MAX, $maxReadCount = PHP_INT_MAX, $throwOnImpossibleRead = false); # reads up to maxReadCount strings in the same flavor readDelimited() does (socket side)
+
+    # protected function skbDelimitedReadScanReset(); # resets delimited reads scan position (internal handler)
 }
 
 trait TBufferDelimitedReadCapability
@@ -338,7 +337,7 @@ trait TBufferDelimitedReadCapability
         $this->skbDelimitedReadScanReset();
     }
 
-    public function skbDelimitedReadScanReset()
+    protected function skbDelimitedReadScanReset()
     {
         $this->skbDelimitedReadLastScanPosition = 0;
         $this->skbDelimitedReadScanBuffer = '';
@@ -376,7 +375,7 @@ trait TBufferDelimitedReadCapability
             if ($position >= $this->skbDelimitedReadLastScanPosition) {
                 # we found a new data block, let us check if it is valid to read first
                 if (!($data instanceof \ATL\Sockets\StringableBufferObject) || !($data instanceof \ATL\Sockets\SizableByteBufferObject)) {
-                    if ($throwOnImpossibleRead) throw new \LengthException("Cannot read delimited string because of special object present in the stream");
+                    if ($throwOnImpossibleRead) throw new \LengthException("Cannot read delimited string because of special object present in the buffer");
                     return false;
                 }
 
@@ -441,7 +440,7 @@ trait TBufferDelimitedReadCapability
         }
 
         if (empty($read)) {
-            if ($throwOnImpossibleRead) throw new \LengthException("Cannot read any delimited string in bulk because of special object present in the stream");
+            if ($throwOnImpossibleRead) throw new \LengthException("Cannot read any delimited string in bulk because of special object present in the buffer");
             return false;
         }
 
