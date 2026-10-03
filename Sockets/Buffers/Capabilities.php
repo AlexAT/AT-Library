@@ -52,55 +52,35 @@ trait TBufferBaseCapability
 
 ########
 # byte size buffer capability maintains byte size inside the buffer instead of message-based count
-# take care that when we cannot read anything from byte-based buffers, we return null and not false, writing nulls is also not allowed
+# take care that writing and returning nulls to byte-based buffers is not allowed
 
-interface IBufferByteSizeCapability extends IBufferBaseCapability { }
+interface IBufferByteSizeCapability extends IBufferBaseCapability
+{
+    const SKB_PARAM_BLOCK_SIZE = 0x2100;
+}
 
 trait TBufferByteSizeCapability
 {
-    public $skbBlockSize; # suggested block size for external operations, take care this is amount skbMaxSize will usually be exceeded up to with
-
-    protected function skbInitializeDefaults($parameters)
+    protected function skbInitializeDefaults()
     {
-        parent::skbInitializeDefaults($parameters);
+        parent::skbInitializeDefaults();
 
         # here we change the defaults for size and watermarks and add block size
         $this->skbRealMaxSize = $this->skbMaxSize = 262144;
         $this->skbLowWatermark = 65536;
-        $this->skbHighWatermark = 196608;
-        $this->skbBlockSize = 131072;
-    }
-
-    protected function skbReadParameters($parameters)
-    {
-        parent::skbReadParameters($parameters);
-
-        foreach ($parameters as $k => $v) {
-            switch ($k) {
-                case 'blockSize': $this->skbBlockSize = $v; break;
-            }
-        }
-    }
-
-    public function read()
-    {
-        return (($result = parent::read()) !== false) ? $result : null;
+        $this->skbRealHighWatermark = $this->skbHighWatermark = 196608;
+        $this->skbExtendSizeBy = 65536;
     }
 
     public function write($data)
     {
-        if ($data === null) throw new \Exception('Attempted to write null to the byte-sized socket buffer'); # cannot add nulls to the byte buffer
+        if ($data === null) throw new \UnexpectedValueException('Attempted to write null to the byte-sized socket buffer'); # cannot add nulls to the byte buffer
         return parent::write($data);
-    }
-
-    public function peek()
-    {
-        return (($result = parent::peek()) !== false) ? $result : null;
     }
 
     public function returnRead($data)
     {
-        if ($data === null) throw new \Exception('Attempted to return null read to the byte-sized socket buffer'); # cannot add nulls to the byte buffer
+        if ($data === null) throw new \UnexpectedValueException('Attempted to return null read to the byte-sized socket buffer'); # cannot add nulls to the byte buffer
         return parent::returnRead($data);
     }
 
@@ -177,6 +157,7 @@ trait TBufferBulkCapability
             $this->skbAddRight($data, true, true);
         }
         $this->skbSizeAdded(count($dataSet), $writeSize, false, $this::SKB_SIZE_OPERATION_ADD_RIGHT);
+        return true;
     }
 
     public function peekBulk($maxReadCount = PHP_INT_MAX)
@@ -200,11 +181,12 @@ trait TBufferBulkCapability
             $this->skbAddLeft($data, true, true);
         }
         $this->skbSizeAdded(count($dataSet), $writeSize, false, $this::SKB_SIZE_OPERATION_ADD_LEFT);
+        return true;
     }
 }
 
 ########
-# bulk string read capability provides readBulkString() and peekBulkString() like bulk capability, reads normally return string (empty string if there is nothing to read), but can also return null if the read is impossible
+# bulk string read capability provides readBulkString() and peekBulkString() like bulk capability, reads normally return string (empty string if there is nothing to read), but can also return false if the read is impossible
 
 interface IBufferBulkStringReadCapability extends IBufferBaseCapability, IBufferBulkCapability
 {
@@ -226,8 +208,8 @@ trait TBufferBulkStringReadCapability
 
         $data = $this->skbPeekLeft();
         if (!($data instanceof \ATL\Sockets\StringableBufferObject) || !($data instanceof \ATL\Sockets\SizableByteBufferObject)) {
-            if ($throwOnImpossibleRead) throw new ReadException("Cannot read anything in bulk as string because of special object present in the stream");
-            return null;
+            if ($throwOnImpossibleRead) throw new \LengthException("Cannot read anything in bulk as string because of special object present in the stream");
+            return false;
         }
 
         return implode('', $this->readBulk($maxReadCount));
@@ -239,8 +221,8 @@ trait TBufferBulkStringReadCapability
 
         $data = $this->skbPeekLeft();
         if (!($data instanceof \ATL\Sockets\StringableBufferObject) || !($data instanceof \ATL\Sockets\SizableByteBufferObject)) {
-            if ($throwOnImpossibleRead) throw new ReadException("Cannot peek anything in bulk as string because of special object present in the stream");
-            return null;
+            if ($throwOnImpossibleRead) throw new \LengthException("Cannot peek anything in bulk as string because of special object present in the stream");
+            return false;
         }
 
         return implode('', $this->peekBulk($maxReadCount));
@@ -249,7 +231,7 @@ trait TBufferBulkStringReadCapability
 
 ########
 # byte read capability provides readBytes(), requires buffer to be byte-sized, normally returns some string (empty string if there is nothing to read)
-# take care that when using mixed buffers (IBufferMixedStreamCapability), readBytes can either return null or throw a ReadException when not enough bytes are available until the first non-stringable / non-sizable object, depending on throwOnImpossibleRead flag
+# take care that when using mixed buffers (IBufferMixedStreamCapability), readBytes can either return false or throw a ReadException when not enough bytes are available until the first non-stringable / non-sizable object, depending on throwOnImpossibleRead flag
 
 interface IBufferByteReadCapability extends IBufferBaseCapability, IBufferByteSizeCapability
 {
@@ -270,8 +252,8 @@ trait TBufferByteReadCapability
 
         if ($exact && ($this->skbSize < $count)) {
             # we cannot get enough bytes for exact read, check if we need to request more bytes
-            if ($this->skbMaxSize < $count) {
-                $this->skbExtendMaxSize($count); # request to temporarily extend the max buffer size to accomodate
+            if ($this->skbRealMaxSize < $count) {
+                $this->skbExtendMaxSize($count, $count); # request to temporarily extend the max buffer size to accomodate, also sett temporary high watermark to the target count to facilitate immediate notification when the required amount is reached
             } else {
                 $this->skbRequestMoreData(); # just request more data to be read (this speeds up socket polling)
             }
@@ -300,9 +282,9 @@ trait TBufferByteReadCapability
         # did we read anything, or enough if reading exactly?
         if (($readSize == 0) || ($exact && ($readSize < $count))) {
             # nope, that is error that must be handled by the caller for mixed buffers
-            while (($data = array_pop($read)) !== null) $this->skbPushLeft($data, true, true); # return everything back to the read buffer
-            if ($throwOnImpossibleRead) throw new ReadException("Cannot read requested number of bytes because of special object present in the stream");
-            return null;
+            while (($data = array_pop($read)) !== false) $this->skbPushLeft($data, true, true); # return everything back to the read buffer
+            if ($throwOnImpossibleRead) throw new \LengthException("Cannot read requested number of bytes because of special object present in the stream");
+            return false;
         }
 
         # did we read more than enough?
@@ -327,8 +309,9 @@ trait TBufferByteReadCapability
 # delimited read capability provides setDelimiter(), readDelimited(), readDelimitedBulk()
 # take care it requires IBufferBulkCapability and IBufferByteReadCapability, as it is meaningless for buffers that cannot support one and also relies on byte reads in corner cases
 # this relies on proper hints sent to skbSizeRemoved/skbSizeAdded to reset delimiter scan position as it needs unchanging buffer contents to fast-forward
-# normally readDelimited() returns a string (empty if nothing to read), and readDelimitedBulk() returns an array (empty if nothing to read), but they can also return null if the read is impossible
+# normally readDelimited() returns a string (empty if nothing to read), and readDelimitedBulk() returns an array (empty if nothing to read), but they can also return false if the read is impossible
 # take care readDelimited() uses scan buffer that can grow up to the requested delimited read maximum line length, absolutely take care it does not use a lot of memory
+# take care delimited normally return delimiter encountered at the end of the string, except if maximum read length is reached (and this can also happen to be mid-delimiter in the corner case)
 # the bulk read is actually not optimized at all as the bulk read routine is already very complex and just calls readDelimited in sequence until it can read nothing more, but it is here for convenience
 
 interface IBufferDelimitedReadCapability extends IBufferBaseCapability, IBufferBulkCapability, IBufferByteReadCapability
@@ -379,12 +362,12 @@ trait TBufferDelimitedReadCapability
         # now this is tricky, the buffer may have not enough data to satisfy at least the delimiter read
         if ($this->skbDelimitedReadDelimiterLength > ($this->skbSize - $this->skbDelimitedReadScanBufferPosition)) {
             # in case the buffer is too small, we need to extend
-            if ($this->skbSize == $this->skbMaxSize) {
-                $this->skbExtendMaxSize($this->skbSize + $this->skbBlockSize); # request to temporarily extend the max buffer size to accomodate one more read block
+            if ($this->skbSize == $this->skbRealMaxSize) {
+                $this->skbExtendMaxSize($this->skbSize + $this->skbExtendSizeBy); # request to temporarily extend the max buffer size to accomodate one more read block
             } else {
                 $this->skbRequestMoreData(); # just request more data to be read (this speeds up socket polling)
             }
-            return null;
+            return false;
         }
 
         # okay, we have new data to read, fast forward read buffer until current scan position, then continue scanning for the delimiter
@@ -393,8 +376,8 @@ trait TBufferDelimitedReadCapability
             if ($position >= $this->skbDelimitedReadLastScanPosition) {
                 # we found a new data block, let us check if it is valid to read first
                 if (!($data instanceof \ATL\Sockets\StringableBufferObject) || !($data instanceof \ATL\Sockets\SizableByteBufferObject)) {
-                    if ($throwOnImpossibleRead) throw new ReadException("Cannot read delimited string because of special object present in the stream");
-                    return null;
+                    if ($throwOnImpossibleRead) throw new \LengthException("Cannot read delimited string because of special object present in the stream");
+                    return false;
                 }
 
                 # append data block to the scan buffer and advance the remembered position
@@ -454,12 +437,12 @@ trait TBufferDelimitedReadCapability
         for ($i = 0; $i < $maxReadCount; $i++) {
             $data = $this->readDelimited($maxLineLength, false);
             if ($data === '') return $read; # nothing more to read, return the result
-            if ($data === null) break; # if encountering impossible read, break out
+            if ($data === false) break; # if encountering impossible read, break out
         }
 
         if (empty($read)) {
-            if ($throwOnImpossibleRead) throw new ReadException("Cannot read any delimited string in bulk because of special object present in the stream");
-            return null;
+            if ($throwOnImpossibleRead) throw new \LengthException("Cannot read any delimited string in bulk because of special object present in the stream");
+            return false;
         }
 
         return $read;
@@ -469,20 +452,20 @@ trait TBufferDelimitedReadCapability
     protected function skbSizeRemoved($count, $size, $silent, $operationHint = null)
     {
         if ($this->skbDelimitedReadScanBufferLength != 0) $this->skbDelimitedReadScanReset(); # at least we can avoid calling that each bloody time
-        parent::skbSizeRemoved($count, $size, $silent, $operationHint);
+        return parent::skbSizeRemoved($count, $size, $silent, $operationHint);
     }
 
     protected function skbSizeAdded($count, $size, $silent, $operationHint = null)
     {
         if (($operationHint != $this::SKB_SIZE_OPERATION_ADD_RIGHT) && ($this->skbDelimitedReadScanBufferLength != 0)) $this->skbDelimitedReadScanReset(); # we can tolerate right add and do not need to call this if no scan
-        parent::skbSizeAdded($count, $size, $silent, $operationHint);
+        return parent::skbSizeAdded($count, $size, $silent, $operationHint);
     }
 }
 
 ########
 # virtual capabilities (just indications and dependencies, no code)
 
-interface IBufferMessageCapability { }; # indicates buffer is a general message buffer
-interface IBufferDatagramCapability { }; # indicates buffer is a byte datagram buffer
-interface IBufferStreamCapability { }; # indicates buffer is a byte stream buffer
-interface IBufferMixedStreamCapability { }; # indicates byte buffer can have non-string messages occuring alongside normal stream, while much not different for normal reads, this may have severe implications i.e. byte/bulk string/delimited reads will always return null or throw exceptions if read cannot be fullfilled because next element cannot be read as string
+interface IBufferMessageCapability { }; # indicates buffer is a general message buffer, null is valid read/write for such and false result is used when no read is avaialble
+interface IBufferDatagramCapability { }; # indicates buffer is a byte datagram buffer, for these, false is normally returned from read operations when there is no data, and null is not a valid read/write
+interface IBufferStreamCapability { }; # indicates buffer is a byte stream buffer, again, false is normally returned from read operations when there is no data, and null is not a valid read/write
+interface IBufferMixedStreamCapability { }; # indicates byte buffer can have non-string messages occuring alongside normal stream, while much not different for normal reads, this may have severe implications i.e. byte/bulk string/delimited reads will always return false or throw exceptions if read cannot be fullfilled because next element cannot be read as string

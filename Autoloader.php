@@ -148,7 +148,6 @@ trait TAutoloader
                 return true;
             }
         }
-
         $target = null;
         foreach (static::$paths as $prefixLength => $prefixes) {
             $path = $prefixes[$prefix = substr($class, 0, $prefixLength)] ?? null;
