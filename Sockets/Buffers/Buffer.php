@@ -11,6 +11,8 @@ namespace ATL\Sockets;
 # Event setters are lowerCamelCased on<event> calls, i.e. onHasData() for hasData event, onEmpty() for empty event, etc.
 # Take care that events must be set using class constants, as socket events are frequent and need to be optimized for performance
 
+# For the API documentation, see IBuffer interface below and also specific buffer capabilities interfaces in the Capabilities file
+
 # The events are defined as follows:
 # - hasData($buffer)
 #     invoked when some data is added to the empty buffer
@@ -90,7 +92,7 @@ interface IBuffer
     const SKB_STATE_ABORTED                 = 0xF800; # buffer aborted either due to error or socket/transport requesting it to abort, only socket side reads are possible
 
     ########
-    # size operation codes
+    # size operation hint codes
     const SKB_SIZE_OPERATION_POP_LEFT       = 0x0000; # [data removed] ...[the rest]
     const SKB_SIZE_OPERATION_POP_RIGHT      = 0x0001; # ...[the rest] [data removed]
     const SKB_SIZE_OPERATION_ADD_LEFT       = 0x0002; # [data added] ...[the rest]
@@ -295,6 +297,7 @@ trait TBuffer
     # no peeking or bulk operations are provided, if these are necessary, they are to be implemented separately
     # for inflight data processing, use silent operations and call skbDataAdded/skbDataRemoved with only the actual data added/removed
     # bulk operations can benefit from doing it all with noSizeUpdate = true then calling skbSizeRemoved/skbSizeAdded directly
+    # take care that low-level operations here cannot really check skbCount/skbSize as they may be adjusted in bulk by high-level operations
 
     # calling order: first to last (mandatory), parents must be called first
     public function skbClear($silent = false)
@@ -307,7 +310,7 @@ trait TBuffer
     # avoid overriding this one unless absolutely necessary
     public function skbPopLeft($silent = false, $noSizeUpdate = false)
     {
-        if ($this->skbCount == 0) return false; # take care null is considered to be a valid readable value
+        if ($this->skbData->isEmpty()) return false;
         $data = $this->skbData->shift();
         if (!$noSizeUpdate) $this->skbDataRemoved($data, $silent, $this::SKB_SIZE_OPERATION_POP_LEFT);
         return $data;
@@ -317,7 +320,7 @@ trait TBuffer
     # avoid overriding this one unless absolutely necessary
     public function skbPopRight($silent = false, $noSizeUpdate = false)
     {
-        if ($this->skbCount == 0) return false; # take care null is considered to be a valid readable value
+        if ($this->skbData->isEmpty()) return false;
         $data = $this->skbData->pop();
         if (!$noSizeUpdate) $this->skbDataRemoved($data, $silent, $this::SKB_SIZE_OPERATION_POP_RIGHT);
         return $data;
@@ -346,16 +349,16 @@ trait TBuffer
     # avoid overriding this one unless absolutely necessary
     public function skbPeekLeft()
     {
-        if ($this->skbCount == 0) return false; # take care null is considered to be a valid readable value
-        return $this->skbData->top();
+        if ($this->skbData->isEmpty()) return false;
+        return $this->skbData->bottom();
     }
 
     # calling order: task-dependent
     # avoid overriding this one unless absolutely necessary
     public function skbPeekRight()
     {
-        if ($this->skbCount == 0) return false; # take care null is considered to be a valid readable value
-        return $this->skbData->bottom();
+        if ($this->skbData->isEmpty()) return false;
+        return $this->skbData->top();
     }
 
     ########
@@ -388,11 +391,12 @@ trait TBuffer
         if (($this->skbSize < $this->skbLowWatermark) && ($oldSize >= $this->skbLowWatermark)) {
             $this->skbRealMaxSize = $this->skbMaxSize; # reset maximum buffer size on reaching low watermark
             $this->skbRealHighWatermark = $this->skbHighWatermark; # also reset high watermark
-            if (!$silent) $this->ehInvokeEventHandlers($this::SKB_EVENT_LOW_WATERMARK, $this);
+            if (!$silent && isset($this->ehEventHandlers[$this::SKB_EVENT_LOW_WATERMARK]))
+                $this->ehInvokeEventHandlers($this::SKB_EVENT_LOW_WATERMARK, $this);
         }
 
-        if ($silent) return;
-        if ($this->skbCount == 0) $this->ehInvokeEventHandlers($this::SKB_EVENT_EMPTY, $this);
+        if (!$silent && isset($this->ehEventHandlers[$this::SKB_EVENT_EMPTY]))
+            if ($this->skbCount == 0) $this->ehInvokeEventHandlers($this::SKB_EVENT_EMPTY, $this);
     }
 
     # calling order: last to first (mandatory), parents must be called last
@@ -413,16 +417,17 @@ trait TBuffer
         if ($this->skbEventReadMode) return $this->skbSendEventModeData();
         if ($silent) return;
 
-        if ($this->skbCount == 1) $this->ehInvokeEventHandlers($this::SKB_EVENT_HAS_DATA, $this);
+        if (($this->skbCount == 1) && isset($this->ehEventHandlers[$this::SKB_EVENT_HAS_DATA]))
+            $this->ehInvokeEventHandlers($this::SKB_EVENT_HAS_DATA, $this);
 
         # this needs the isset here as we really want to avoid frequent method calls
         if (isset($this->ehEventHandlers[$this::SKB_EVENT_NEW_DATA]))
             $this->ehInvokeEventHandlers($this::SKB_EVENT_NEW_DATA, $this);
 
-        if (($this->skbSize >= $this->skbRealHighWatermark) && ($oldSize < $this->skbRealHighWatermark))
+        if (($this->skbSize >= $this->skbRealHighWatermark) && ($oldSize < $this->skbRealHighWatermark) && isset($this->ehEventHandlers[$this::SKB_EVENT_HIGH_WATERMARK]))
             $this->ehInvokeEventHandlers($this::SKB_EVENT_HIGH_WATERMARK, $this);
 
-        if (($this->skbSize >= $this->skbRealMaxSize) && ($oldSize < $this->skbRealMaxSize))
+        if (($this->skbSize >= $this->skbRealMaxSize) && ($oldSize < $this->skbRealMaxSize) && isset($this->ehEventHandlers[$this::SKB_EVENT_FULL]))
             $this->ehInvokeEventHandlers($this::SKB_EVENT_FULL, $this);
     }
 
@@ -441,10 +446,10 @@ trait TBuffer
     {
         $oldSize = $this->skbRealMaxSize;
         $newBufferSize = max($targetSize, $this->skbRealMaxSize + $this->skbExtendSizeBy);
-        $this->skbRealMaxSize = $newMaxSize;
+        $this->skbRealMaxSize = $newBufferSize;
         if ($targetWaterMark !== null) {
             $this->skbRealHighWatermark = $targetWaterMark;
-            if (($this->skbSize >= $this->skbRealHighWatermark) && ($oldSize < $this->skbRealHighWatermark))
+            if (($this->skbSize >= $this->skbRealHighWatermark) && ($oldSize < $this->skbRealHighWatermark) && isset($this->ehEventHandlers[$this::SKB_EVENT_HIGH_WATERMARK]))
                 $this->ehInvokeEventHandlers($this::SKB_EVENT_HIGH_WATERMARK, $this);
         }
         if (!$silent) $this->skbRequestMoreData();
@@ -453,7 +458,8 @@ trait TBuffer
     # calling order: last to first (mandatory), parents must be called last
     protected function skbRequestMoreData()
     {
-        $this->ehInvokeEventHandlers($this::SKB_EVENT_PENDING_DATA, $this);
+        if (isset($this->ehEventHandlers[$this::SKB_EVENT_PENDING_DATA]))
+            $this->ehInvokeEventHandlers($this::SKB_EVENT_PENDING_DATA, $this);
     }
 
     ########
@@ -726,7 +732,8 @@ trait TBuffer
             'contents' => [],
         ];
 
-        foreach ($this->skbData as $v) $data['contents'][] = $v;
+        foreach ($this->skbData as $v)
+            $data['contents'][] = is_scalar($v) ? (($v !== null) ? \ATL\Routines::escapeUTF8StringToPrintable($v) : '<NULL>') : $v;
         if (empty($data['contents'])) $data['contents'] = '<EMPTY>';
 
         if (isset($args[0]))

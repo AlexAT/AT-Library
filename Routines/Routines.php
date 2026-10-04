@@ -161,7 +161,7 @@ class Routines
     # for static class array callables effective in PHP 7.x and 8.x without JIT (~25% gain), with JIT is comparable (~1% loss)
     # for static class string calls, extremely effective both with JIT (~40% gain) and without JIT (~70% gain)
     # for object invocations, effective without JIT (~10% gain), but ineffective with JIT (~25% loss)
-    # for simple global function string calls, still effective without JIT (~20% gain), but BREAKS JIT, resulting in huge performace loss (~500% loss)
+    # for simple global function string calls, still effective without JIT (~20% gain), but BREAKS JIT, resulting in huge performace loss (~80% loss)
     # so if you set skipIfIneffective to true, we do not optimize static class array callables, object invocations and global function string calls with JIT, returning the original callable
     # take care that in case skipIfIneffective is set to true, return value may not necessarily be of Closure type, so using this may require extra checking caller side if it depends on callable type
     public static function callableToClosure($callback, $skipIfIneffective = false)
@@ -242,6 +242,7 @@ class Routines
 
     ########
     # dynamically includes PHP code from internal pseudo stream wrapper
+
     public static function includeCode($code)
     {
         stream_wrapper_register('tempatlbase64data', '\\ATL\\StreamBase64Data');
@@ -270,5 +271,22 @@ class Routines
     {
         if ($time === null) $time = time();
         return static::HOTP($key, intdiv($time - $start, $step), $length, $algo);
+    }
+
+    ########
+    # escape all arbitrary (UTF8) string with possibly errors and non-printable characters into string suitable for debug display or editor insertion
+    public static function escapeUTF8StringToPrintable($string, $quote = true)
+    {
+        $string = preg_replace_callback(
+            '#[^[:print:]]#u',
+            function ($s) {
+                $out = [];
+                $l = strlen($s = $s[0]);
+                for ($i = 0; $i < $l; $i++)
+                    $out[] = "\x00x".str_pad(strtoupper(dechex(ord($s[$i]))), 2, '0', STR_PAD_LEFT);
+                return implode('', $out);
+            }, $string);
+
+        return $quote ? '"'.strtr($string, ['\\' => '\\\\', "\x00" => '\\', '"' => '\\"']).'"' : strtr($string, ["\x00" => '\\', '\\' => '\\\\']);
     }
 }
