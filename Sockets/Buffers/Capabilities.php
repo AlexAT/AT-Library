@@ -307,7 +307,7 @@ trait TBufferByteReadCapability
 
         $read = null; $readSize = 0; $readCount = 0;
         $stream = ''; $streamSize = 0; $streamPosition = 0;
-        $blockCount = 0; $removeCount = 0; $lastBlockSize = 0;
+        $blockCount = 0; $removeCount = 0; $lastBlockRemainder = 0;
         foreach ($this->skbData as $data) { # here we go with direct buffer access because popping and returning a huge bulk of blocks is very consuming
             # to process as bytes, the object must be sizable and stringable, it will be converted to string after the operation
             if (!is_string($data) && !is_scalar($data)) {
@@ -325,7 +325,7 @@ trait TBufferByteReadCapability
             } else {
                 $stream .= (string) $data;
             }
-            $streamSize += ($lastBlockSize = strlen($data));
+            $streamSize += strlen($data);
             $blockCount++;
 
             # process all byte blocks we can infer from the currently added block
@@ -343,6 +343,7 @@ trait TBufferByteReadCapability
                 $readCount++;
                 $streamPosition += $count; # move to the next position
                 $removeCount = $blockCount; # set block removal count to the current block count
+                $lastBlockRemainder = $streamSize - $streamPosition; # remember remainder size of the last block to return down
                 if ($readCount == $maxReadCount) goto endRead; # finish reading if we read enough
             }
 
@@ -380,18 +381,12 @@ endRead:
         }
 
         # the read is non-empty, so we may have remaining data from the last block to return to the buffer instead of the last block, do it if so
-        if ($streamPosition != $streamSize) {
-            if (($streamSize - $streamPosition) < $lastBlockSize) {
-                # not the whole block left, return it instead of the last block
-                for ($i = 0; $i < $realRemoveCount; $i++) $this->skbPopLeft(true, true); # remove all blocks necessary
-                $realRemoveCount = 0; # we removed everything, so nothing to do later anymore
-                $this->skbAddLeft(substr($stream, $streamPosition), true, true); # return what is remaining back to the buffer
-                $this->skbSizeAdded(1, 0, true, $this::SKB_SIZE_OPERATION_OTHER); # just add 1 new element to the buffer without changing the data size (as we remove exactly how much we read accounting for the new element), using 'other' operation here also makes all monitors reset their states
-            } else {
-                # just do not remove the last block as whole
-                $removeCount--;
-                $realRemoveCount--;
-            }
+        if ($lastBlockRemainder != 0) {
+            # part of the last block left, return it instead of the last block
+            for ($i = 0; $i < $realRemoveCount; $i++) $this->skbPopLeft(true, true); # remove all blocks necessary
+            $realRemoveCount = 0; # we removed everything, so nothing to do later anymore
+            $this->skbAddLeft(substr($stream, $streamPosition, $lastBlockRemainder), true, true); # return what is remaining back to the buffer
+            $this->skbSizeAdded(1, 0, true, $this::SKB_SIZE_OPERATION_OTHER); # just add 1 new element to the buffer without changing the data size (as we remove exactly how much we read accounting for the new element), using 'other' operation here also makes all monitors reset their states
         }
 
 finalizeRead:
@@ -417,6 +412,10 @@ finalizeRead:
 # take care that in the default case of strict=true delimited reads, the read may be reading nothing forever even if some data remains in the buffer, but is less than delimiter in length, and no new data comes to satisfy the read
 # in case we are running in strict=false mode, impossible reads are only returned when we really have completely nothing to read due to the
 
+# when using multiple delimiters, take care the shortest delimiter always matches first, so multiple delimiters can be suffixes of other delimiters, but not prefixes or inclusions
+# i.e. when supplying \n and \r\n (B and AB), all is ok, but if supplying \r and \r\n (A and AB), \r\n (AB) will never match, if i.e. B and ABC is supplied, ABC will never match
+# strict reads always try to leave space for the longest supplied delimiter when reading up to max line length
+
 # the delimited read logic mostly follows the byte read logic, except it additionally scans for a delimiter instead of just checking length and also tracks scanning state in the buffer object
 
 interface IBufferDelimitedReadCapability extends IBufferBaseReadCapability, IBufferBulkReadCapability, IBufferByteReadCapability
@@ -434,18 +433,29 @@ interface IBufferDelimitedReadCapability extends IBufferBaseReadCapability, IBuf
 
 trait TBufferDelimitedReadCapability
 {
-    public $skbDelimitedReadDelimiter;
-    public $skbDelimitedReadDelimiterLength;
+    public $skbDelimitedReadDelimiters;
+    public $skbDelimitedReadDelimiterMatch;
+    public $skbDelimitedMinReadDelimiterLength;
+    public $skbDelimitedMaxReadDelimiterLength;
     public $skbDelimitedReadLastScanPosition;
-    public $skbDelimitedReadLastBlockSize;
     public $skbDelimitedReadScanBuffer;
     public $skbDelimitedReadScanBufferLength;
     public $skbDelimitedReadScanBufferPosition;
 
-    public function setDelimiter($delimiter)
+    public function setDelimiter($delimiters, $caseInsensitive = false)
     {
-        $this->skbDelimitedReadDelimiter = (string) $delimiter;
-        $this->skbDelimitedReadDelimiterLength = strlen($delimiter);
+        if ($delimiters !== null) {
+            $this->skbDelimitedReadDelimiters = is_array($delimiters) ? $delimiters : [$delimiters];
+            usort($this->skbDelimitedReadDelimiters, function ($a, $b) { return strlen($a) <=> strlen($b); }); # sort delimiters by length as we need an ungreedy match
+            $this->skbDelimitedMinReadDelimiterLength = strlen(reset($this->skbDelimitedReadDelimiters));
+            $this->skbDelimitedMaxReadDelimiterLength = strlen(end($this->skbDelimitedReadDelimiters));
+            $this->skbDelimitedReadDelimiterMatch = '#'.implode('|', array_map(function ($s) { return preg_quote($s, '#'); }, $this->skbDelimitedReadDelimiters)).'#UsS'.($caseInsensitive ? 'i' : '');
+        } else {
+            $this->skbDelimitedReadDelimiters = null;
+            $this->skbDelimitedReadDelimiterMatch = null;
+            $this->skbDelimitedMinReadDelimiterLength = 0;
+            $this->skbDelimitedMaxReadDelimiterLength = 0;
+        }
         $this->skbDelimitedReadScanReset();
     }
 
@@ -455,7 +465,6 @@ trait TBufferDelimitedReadCapability
         $this->skbDelimitedReadScanBuffer = '';
         $this->skbDelimitedReadScanBufferLength = 0;
         $this->skbDelimitedReadScanBufferPosition = 0;
-        $this->skbDelimitedReadLastBlockSize = 0;
     }
 
     public function readDelimited($maxLineLength = PHP_INT_MAX, $strict = true, $throwOnImpossibleRead = false)
@@ -479,8 +488,8 @@ trait TBufferDelimitedReadCapability
     protected function readDelimitedBulkInternal($maxLineLength = PHP_INT_MAX, $maxReadCount = PHP_INT_MAX, $strict = true, $throwOnImpossibleRead = false, $forceArray = false)
     {
         if ($maxReadCount <= 0) return $forceArray ? [] : ''; # requested zero count to read, return nothing
-        if ($maxLineLength <= $this->skbDelimitedReadDelimiterLength) $maxLineLength = $this->skbDelimitedReadDelimiterLength; # requested weird maximum line length to be read, reset it to delimiter length
-        if (($this->skbDelimitedReadDelimiter ?? '') === '') return $this->readBytesBulk(min(1, $maxLineLength), $maxReadCount, $strict, $throwOnImpossibleRead); # if no delimiter, we resort to readBytes and also avoid the situation where maxLineLength can be 0 under this condition
+        if ($maxLineLength <= $this->skbDelimitedMaxReadDelimiterLength) $maxLineLength = $this->skbDelimitedMaxReadDelimiterLength; # requested weird maximum line length to be read, reset it to delimiter length
+        if ($this->skbDelimitedReadDelimiters === null) return $this->readBytesBulk(min(1, $maxLineLength), $maxReadCount, $strict, $throwOnImpossibleRead); # if no delimiter, we resort to readBytes and also avoid the situation where maxLineLength can be 0 under this condition
 
         if ($this->skbSize == 0) {
             # nothing to read, request more data
@@ -489,7 +498,7 @@ trait TBufferDelimitedReadCapability
         }
 
         $read = null; $readSize = 0; $readCount = 0;
-        $blockCount = 0; $removeCount = 0;
+        $blockCount = 0; $removeCount = 0; $lastBlockRemainder = 0;
         $impossibleReadEncountered = false; # this flag is necessary to correctly alter non-strict mode behavior after the read
         foreach ($this->skbData as $data) { # here we go with direct buffer access because popping and returning a huge bulk of blocks is very consuming
             # to process as bytes, the object must be sizable and stringable, it will be converted to string after the operation
@@ -515,29 +524,30 @@ trait TBufferDelimitedReadCapability
                 } else {
                     $this->skbDelimitedReadScanBuffer .= (string) $data;
                 }
-                $this->skbDelimitedReadScanBufferLength += ($this->skbDelimitedReadLastBlockSize = strlen($data));
+                $this->skbDelimitedReadScanBufferLength += strlen($data);
                 $this->skbDelimitedReadLastScanPosition = $blockCount; # remember the new scan position
             }
 
-            # scan for the delimiter and check for reaching the byte count, this happens only if we really have enough bytes to accomodate the delimiter
-            if (($this->skbDelimitedReadScanBufferLength - $this->skbDelimitedReadScanBufferPosition) >= $this->skbDelimitedReadDelimiterLength) {
+            # scan for the delimiter and check for reaching the byte count, this happens only if we really have enough bytes to accomodate at least the tiniest delimiter
+            if (($this->skbDelimitedReadScanBufferLength - $this->skbDelimitedReadScanBufferPosition) >= $this->skbDelimitedMinReadDelimiterLength) {
                 while (
-                    (($delimiterPosition = strpos($this->skbDelimitedReadScanBuffer, $this->skbDelimitedReadDelimiter, $this->skbDelimitedReadScanBufferPosition)) !== false)
+                    ($delimiterFound = preg_match($this->skbDelimitedReadDelimiterMatch, $this->skbDelimitedReadScanBuffer, $matches, PREG_OFFSET_CAPTURE, $this->skbDelimitedReadScanBufferPosition))
                     || (($this->skbDelimitedReadScanBufferLength - $this->skbDelimitedReadScanBufferPosition) >= $maxLineLength)
                 ) {
                     # finally, we found up our delimiter or reached the maximum line length supplied, now we need to calculate correct read length
-                    if ($delimiterPosition === false) {
+                    if (!$delimiterFound) {
                         # if we are running in strict mode and cannot be sure we are not encountering the delimiter in the next byte, we still need the next block
                         # so we determine the remainder length and check it to be at least one byte larger than the delimiter in strict mode, in non-strict, we just read
-                        $readLength = $strict ? min($maxLineLength, $this->skbDelimitedReadScanBufferLength - $this->skbDelimitedReadScanBufferPosition - $this->skbDelimitedReadDelimiterLength + 1) : $maxLineLength;
+                        $readLength = $strict ? min($maxLineLength, $this->skbDelimitedReadScanBufferLength - $this->skbDelimitedReadScanBufferPosition - $this->skbDelimitedMaxReadDelimiterLength + 1) : $maxLineLength;
                     } else {
                         # we have found our delimiter, but we may also be reaching maximum line length here
                         # if we do, in strict mode we check maximum read to include the delimiter, if it does not, it reads up to the delimiter, but skips the delimiter itself
-                        $readLength = $delimiterPosition - $this->skbDelimitedReadScanBufferPosition + $this->skbDelimitedReadDelimiterLength;
+                        $delimiterLength = strlen($matches[0][0]); # matches[0][0] is found delimiter, matches[0][1] is found delimiter position
+                        $readLength = $matches[0][1] - $this->skbDelimitedReadScanBufferPosition + $delimiterLength;
                         if ($readLength > $maxLineLength) {
                             # whoops, we also reached the maximum line length, for strict mode, clamp it to minimum of the read length without delimiter and available maximum length
                             # non-strict mode may end in the middle of delimiter here, take care
-                            $readLength = $strict ? min($maxLineLength, $readLength - $this->skbDelimitedReadDelimiterLength) : $maxLineLength;
+                            $readLength = $strict ? min($maxLineLength, $readLength - $delimiterLength) : $maxLineLength;
                         }
                     }
 
@@ -554,6 +564,7 @@ trait TBufferDelimitedReadCapability
                     $readCount++;
                     $this->skbDelimitedReadScanBufferPosition += $readLength; # move to the next scan position
                     $removeCount = $blockCount; # set block removal count to the current block count
+                    $lastBlockRemainder = $this->skbDelimitedReadScanBufferLength - $this->skbDelimitedReadScanBufferPosition; # remember remainder size of the last block to return down
                     if ($readCount == $maxReadCount) goto finishScan; # finish scanning if we read enough, but do not skip the persistent buffer shrink phase
                 }
 
@@ -598,20 +609,14 @@ endRead:
             return false;
         }
 
-        # if the read is non-empty, we may have remaining data from the last block to return to the buffer instead of the last block, do it if so
-        if (($read !== null) && ($this->skbDelimitedReadScanBufferPosition != $this->skbDelimitedReadScanBufferLength)) {
-            if (($this->skbDelimitedReadScanBufferLength - $this->skbDelimitedReadScanBufferPosition) < $this->skbDelimitedReadLastBlockSize) {
-                # not the whole block left, return it instead of the last block
-                for ($i = 0; $i < $realRemoveCount; $i++) $this->skbPopLeft(true, true); # remove all blocks necessary
-                $realRemoveCount = 0; # we removed everything, so nothing to do later anymore
-                $this->skbAddLeft(substr($this->skbDelimitedReadScanBuffer, $this->skbDelimitedReadScanBufferPosition), true, true); # return what is remaining
-                $this->skbSizeAdded(1, 0, true, $this::SKB_SIZE_OPERATION_ADD_LEFT_DELIMITED_READ_REMAINDER); # just add 1 new element to the buffer without changing the data size (as we remove exactly how much we read accounting for the new element), make sure we do not hurt further scans by doing so
-                $this->skbDelimitedReadLastScanPosition++; # compensate delimiter scan position
-            } else {
-                # just don't remove the last block as whole
-                $removeCount--;
-                $realRemoveCount--;
-            }
+        # we may have remaining data from the last block to return to the buffer instead of the last block, do it if so
+        if ($lastBlockRemainder != 0) {
+            # part of the last block left, return it instead of the last block
+            for ($i = 0; $i < $realRemoveCount; $i++) $this->skbPopLeft(true, true); # remove all blocks necessary
+            $realRemoveCount = 0; # we removed everything, so nothing to do later anymore
+            $this->skbAddLeft(substr($this->skbDelimitedReadScanBuffer, $this->skbDelimitedReadScanBufferPosition, $lastBlockRemainder), true, true); # return what is remaining
+            $this->skbSizeAdded(1, 0, true, $this::SKB_SIZE_OPERATION_ADD_LEFT_DELIMITED_READ_REMAINDER); # just add 1 new element to the buffer without changing the data size (as we remove exactly how much we read accounting for the new element), make sure we do not hurt further scans by doing so
+            $this->skbDelimitedReadLastScanPosition++; # compensate delimiter scan position
         }
 
 finalizeRead:

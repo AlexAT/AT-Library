@@ -84,7 +84,7 @@ function testMain()
     }
     readResult($loopSocket, $read);
 
-    echo("TEST 5: DELIMITED READS, LAST LINE WILL BE ATTEMPTED, FAIL TO READ, THEN FIT MAX READ SIZE\n");
+    echo("TEST 7: DELIMITED READS, LAST LINE WILL BE ATTEMPTED, FAIL TO READ, THEN FIT MAX READ SIZE\n");
     writeTestSet($loopSocket);
     $read = [];
     $loopSocket->setDelimiter("\r\n");
@@ -119,7 +119,7 @@ function testMain()
     }
     readResult($loopSocket, $read);
 
-    echo("TEST 6: BULK DELIMITED READS WITH LOW CHUNK SIZE, THE LAST LINE WILL BE JUST READ BY READBYTES AS IT HAS NO DELIMITER\n");
+    echo("TEST 8: BULK DELIMITED READS WITH LOW CHUNK SIZE, THE LAST LINE WILL BE JUST READ BY READBYTES AS IT HAS NO DELIMITER\n");
     writeTestSet($loopSocket);
     $read = [];
     $loopSocket->setDelimiter("\r\n");
@@ -136,6 +136,19 @@ function testMain()
         echo(" * BULK DELIMITED (\\N/32) READ, TOTAL ".count($chunk)." LINES\n");
         foreach ($chunk as $data) $read[] = $data;
     }
+    if (($data = $loopSocket->readBytes()) !== '') {
+        echo(" * READ ".strlen($data)." BYTES\n");
+        $read[] = $data;
+    } else {
+        echo(" * NOTHING TO READ\n");
+    }
+    readResult($loopSocket, $read);
+
+    echo("TEST 9: DELIMITED READS WITH DUAL DELIMITER, LAST LINE WILL BE ATTEMPTED, FAIL TO READ, THEN FIT MAX READ SIZE\n");
+    writeTestSet($loopSocket);
+    $read = [];
+    $loopSocket->setDelimiter(["\r\n", "\n"]);
+    $read = $loopSocket->readDelimitedBulk();
     if (($data = $loopSocket->readBytes()) !== '') {
         echo(" * READ ".strlen($data)." BYTES\n");
         $read[] = $data;
