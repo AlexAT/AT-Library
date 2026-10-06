@@ -2,9 +2,11 @@
 
 namespace ATL\Sockets;
 
-# when composing capabilities, compose them one by one into a chain of classes as capabilities can overwrite methods and properties incrementally
-# when composing capabilities, compose them in the interface dependency order listed here, as otherwise you may overwrite it a wrong way and end with unexpected result
-# take care that capabilities provide both read and write counterparts at once, but normally each buffer is only used one way, very weird issues may happen if it is not so
+# Buffers capabilities provide user-side and additional internal data handling API for generic socket buffers, complementary to the transport API
+# Take care that capabilities do specialize the buffers as buffers start doing different things, so socket capabilities API must follow the buffer type
+# When composing capabilities, compose them one by one into a chain of classes as capabilities can overwrite methods and properties incrementally
+# When composing capabilities, compose them in the interface dependency order listed here, as otherwise you may overwrite it a wrong way and end with unexpected result
+# Take care that capabilities provide both read and write counterparts at once, but normally each buffer is only used one way, very weird issues may happen if it is not so
 
 ########
 # the very basic message/datagram buffer capability
@@ -64,6 +66,9 @@ trait TBufferBaseWriteCapability
 ########
 # byte size buffer capability maintains byte size inside the buffer instead of message-based count
 # take care that writing and returning nulls to byte-based buffers is not allowed
+# suggested block size parameter may or may not be honored by the underlying transport, it is recommended but not mandatory to honor it
+# on the other hand, maximum read buffer sizes are expected to be honored, in general transport must pause reads when buffer reaches its maximum
+# write buffers can easily grow over the maximum size, and it is up to application to honor throttling the writes so they do not exceed
 
 interface IBufferByteSizeCapability
 {
@@ -79,6 +84,7 @@ trait TBufferByteSizeCapability
         parent::skbInitializeDefaults();
 
         # here we change the defaults for size and watermarks and add block size
+        # these defaults are more or less a middle ground for most of the network, file and other typical stream and datagram operations
         $this->skbRealMaxSize = $this->skbMaxSize = 262144;
         $this->skbLowWatermark = 65536;
         $this->skbRealHighWatermark = $this->skbHighWatermark = 196608;
@@ -94,7 +100,7 @@ trait TBufferByteSizeCapability
     {
         if ($data === null) throw new \UnexpectedValueException('Attempted to operate on null data block in the byte-sized socket buffer'); # cannot use nulls in the byte buffer
         if (is_scalar($data)) return strlen($data); # strings and other scalars are just string byte count in size
-        if ($data instanceof \ATL\Sockets\SizableByteBufferObject) return $data->skboGetSize(); # sizable byte buffer objects can get us their own size
+        if ($data instanceof \ATL\Sockets\ISizableByteBufferObject) return $data->skboGetSize(); # sizable byte buffer objects can get us their own size
         return 0; # anything not sizable does not count against the buffer size
     }
 }
@@ -208,7 +214,7 @@ trait TBufferBulkWriteCapability
 ########
 # bulk string read capability provides readBulkString() and peekBulkString() like bulk capability, reads normally return string (empty string if there is nothing to read), but can also return false if the read is impossible
 
-interface IBufferBulkStringReadCapability extends IBufferBaseReadCapability, IBufferByteSizeCapability, IBufferBulkReadCapability
+interface IBufferBulkStringReadCapability extends IBufferBaseReadCapability, IBufferByteSizeCapability
 {
     public function readBulkString($maxReadCount = PHP_INT_MAX, $throwOnImpossibleRead = false); # reads and removes up to maxReadCount data blocks from the buffer, returning result as concatenated string (socket side)
     public function peekBulkString($maxReadCount = PHP_INT_MAX, $throwOnImpossibleRead = false); # peeks up to maxReadCount data blocks from the buffer, returning result as concatenated string (socket side)
@@ -226,30 +232,49 @@ trait TBufferBulkStringReadCapability
             return '';
         }
 
-        $data = $this->skbPeekLeft();
-        if (!is_string($data) && !is_scalar($data)) {
-            if (!($data instanceof \ATL\Sockets\StringableBufferObject)) {
-                if ($throwOnImpossibleRead) throw new \LengthException("Cannot read anything in bulk as string because of special object present in the stream");
-                return false;
+        $read = [];
+        $readSize = 0;
+        for ($i = 0; $i < $maxReadCount; $i++) {
+            if (($data = $this->skbPopLeft(true, true)) === false) break;
+            if (!is_string($data) && !is_scalar($data)) {
+                if (!($data instanceof \ATL\Sockets\StringableBufferObject)) {
+                    # we reached an object that cannot be converted to string, return it back, if we didn't read anything at all, this is an impossible read
+                    $this->skbAddLeft($data, true, true);
+                    if (empty($read)) {
+                        if ($throwOnImpossibleRead) throw new \LengthException("Cannot read anything in bulk as string because of special object present in the stream");
+                        return false;
+                    }
+                    break;
+                }
             }
+            $readSize += $this->skbGetDataSize($data);
+            $read[] = $data;
         }
-
-        return implode('', $this->readBulk($maxReadCount));
+        $this->skbSizeRemoved(count($read), $readSize, false, $this::SKB_SIZE_OPERATION_POP_LEFT);
+        return implode('', $read);
     }
 
     public function peekBulkString($maxReadCount = PHP_INT_MAX, $throwOnImpossibleRead = false)
     {
         if (($this->skbCount == 0) || ($maxReadCount <= 0)) return ''; # nothing to peek because of empty buffer or maximum read count, we do not request more data here because we don't need to, we are just peeking
 
-        $data = $this->skbPeekLeft();
-        if (!is_string($data) && !is_scalar($data)) {
-            if (!($data instanceof \ATL\Sockets\StringableBufferObject)) {
-                if ($throwOnImpossibleRead) throw new \LengthException("Cannot peek anything in bulk as string because of special object present in the stream");
-                return false;
+        $peek = [];
+        $peekCount = 0;
+        foreach ($this->skbData as $data) {
+            if (!is_string($data) && !is_scalar($data)) {
+                if (!($data instanceof \ATL\Sockets\StringableBufferObject)) {
+                    # we reached an object that cannot be converted to string, if we didn't peek anything at all, this is an impossible peek
+                    if (empty($peek)) {
+                        if ($throwOnImpossibleRead) throw new \LengthException("Cannot peek anything in bulk as string because of special object present in the stream");
+                        return false;
+                    }
+                    break;
+                }
             }
+            $peek[] = $data;
+            if (++$peekCount >= $maxPeekCount) break;
         }
-
-        return implode('', $this->peekBulk($maxReadCount));
+        return implode('', $peek);
     }
 }
 
@@ -308,10 +333,10 @@ trait TBufferByteReadCapability
         $read = null; $readSize = 0; $readCount = 0;
         $stream = ''; $streamSize = 0; $streamPosition = 0;
         $blockCount = 0; $removeCount = 0; $lastBlockRemainder = 0;
-        foreach ($this->skbData as $data) { # here we go with direct buffer access because popping and returning a huge bulk of blocks is very consuming
+        foreach ($this->skbData as $data) {
             # to process as bytes, the object must be sizable and stringable, it will be converted to string after the operation
             if (!is_string($data) && !is_scalar($data)) {
-                if (!($data instanceof \ATL\Sockets\StringableBufferObject) || !($data instanceof \ATL\Sockets\SizableByteBufferObject)) {
+                if (!($data instanceof \ATL\Sockets\StringableBufferObject) || !($data instanceof \ATL\Sockets\ISizableByteBufferObject)) {
                     # we cannot, return the one we just read and end it here
                     $this->skbAddLeft($data, true, true);
                     goto endRead; # and out of the loop to check for impossible read and return the unread remainder if exact read is requested
@@ -500,10 +525,10 @@ trait TBufferDelimitedReadCapability
         $read = null; $readSize = 0; $readCount = 0;
         $blockCount = 0; $removeCount = 0; $lastBlockRemainder = 0;
         $impossibleReadEncountered = false; # this flag is necessary to correctly alter non-strict mode behavior after the read
-        foreach ($this->skbData as $data) { # here we go with direct buffer access because popping and returning a huge bulk of blocks is very consuming
+        foreach ($this->skbData as $data) {
             # to process as bytes, the object must be sizable and stringable, it will be converted to string after the operation
             if (!is_string($data) && !is_scalar($data)) {
-                if (!($data instanceof \ATL\Sockets\StringableBufferObject) || !($data instanceof \ATL\Sockets\SizableByteBufferObject)) {
+                if (!($data instanceof \ATL\Sockets\StringableBufferObject) || !($data instanceof \ATL\Sockets\ISizableByteBufferObject)) {
                     # we cannot, return the one we just read, set the impossible read flag and end it here
                     $this->skbAddLeft($data, true, true);
                     $impossibleReadEncountered = true;
