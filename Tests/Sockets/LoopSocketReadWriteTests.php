@@ -27,6 +27,7 @@ class Test
             7 => ['name' => 'DELIMITED READS, LAST LINE WILL BE ATTEMPTED, FAIL TO READ, THEN FIT MAX READ SIZE'],
             8 => ['name' => 'BULK DELIMITED READS WITH LOW CHUNK SIZE, THE LAST LINE WILL BE JUST READ BY READBYTES AS IT HAS NO DELIMITER'],
             9 => ['name' => 'LARGE BULK DELIMITED READ WITH DUAL DELIMITER, LAST LINE WILL BE JUST READ BY READBYTES AS IT HAS NO DELIMITER'],
+            10 => ['name' => 'LARGE BULK DELIMITED READ WITH DUAL DELIMITER, STOPPING ON EMPTY LINE, LAST LINE WILL BE JUST READ BY READBYTES AS IT HAS NO DELIMITER'],
         ];
         ob_start();
         foreach ($tests as $id => &$test) {
@@ -205,9 +206,28 @@ class Test
     function test9($socket)
     {
         # LARGE BULK DELIMITED READ WITH DUAL DELIMITER, LAST LINE WILL BE JUST READ BY READBYTES AS IT HAS NO DELIMITER
-        $read = [];
         $socket->setDelimiter(["\r\n", "\n"]);
         $read = $socket->readDelimitedBulk();
+        if (($data = $socket->readBytes()) !== '') {
+            echo(" * READ ".strlen($data)." BYTES\n");
+            $read[] = $data;
+        } else {
+            echo(" * NOTHING TO READ\n");
+        }
+        return $read;
+    }
+
+    function test10($socket)
+    {
+        # LARGE BULK DELIMITED READ WITH DUAL DELIMITER, STOPPING ON EMPTY LINE, LAST LINE WILL BE JUST READ BY READBYTES AS IT HAS NO DELIMITER
+        $read = [];
+        $socket->setDelimiter(["\r\n", "\n"]);
+        for ($i = 1; $i < 5; $i++) {
+            if (!empty($chunk = $socket->readDelimitedBulk(PHP_INT_MAX, PHP_INT_MAX, true, true))) {
+                echo(" * BULK DELIMITED READ {$i}, TOTAL ".count($chunk)." LINES\n");
+                foreach ($chunk as $data) $read[] = $data;
+            }
+        }
         if (($data = $socket->readBytes()) !== '') {
             echo(" * READ ".strlen($data)." BYTES\n");
             $read[] = $data;

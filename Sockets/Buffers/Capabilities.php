@@ -8,6 +8,93 @@ namespace ATL\Sockets;
 # When composing capabilities, compose them in the interface dependency order listed here, as otherwise you may overwrite it a wrong way and end with unexpected result
 # Take care that capabilities provide both read and write counterparts at once, but normally each buffer is only used one way, very weird issues may happen if it is not so
 
+# Quick base capabilities public API documentation is all aggregated here, read the implementation for more details
+
+# BufferBaseReadCapability
+#   applicability: read buffers
+# Public API:
+# - read()
+#   reads one data block from the buffer left side, returns false is there is nothing to read, automatically requests for more data if there is nothing to read
+# - peek()
+#   previews one data block from the buffer left side, returns false if there is nothing to preview
+# - returnRead($data)
+#   places one data block back to the buffer left side, returns true if operation succeeded (base implementation always returns true)
+
+# BufferBaseWriteCapability
+#   applicability: write buffers
+# Public API:
+# - write()
+#   places one data block to the buffer right side, returns true if operation succeeded, false otherwise
+#   false normally means the buffer is not writeable (anymore) - i.e. not yet open or already closed
+
+# BufferByteSizeCapability
+#   applicability: any buffers
+# Details:
+#   switches buffer size from data blocks to bytes, automatically calculates string blocks size, provides support for ISizableBufferObject objects in the buffer
+#   non-sizable blocks in the buffer do not count against buffer size and are considered to be of zero length
+#   this capability also prevents adding null blocks to the buffer, attempting to add such will result in exception
+#   take care zero-length empty strings are perfectly valid data blocks and they can easily be encountered i.e. in UDP/other datagram buffers
+# Parameters:
+# - BLOCK_SIZE
+#   recommended maximum read/write block size for transport implementations, not mandatory but is recommended to be honored
+#   stored in skbBlockSize internally
+
+# BufferFlushCapability
+#   applicability: write buffers
+# Public API:
+# - flush()
+#   requests urgent flush of the data accumulated in the buffer (may i.e. also enable TCP_NODELAY until buffer is empty for TCP sockets), not mandatory but is recommended to be honored
+#   returns true if operation succeeded, false otherwise (i.e. when socket is not open or already closed, or when flushing is impossible / unsupported)
+# Events:
+# - flush
+#   sent when flush() API method is invoked
+
+# BufferBulkReadCapability
+#   applicability: read buffers
+# Public API:
+# - readBulk($maxReadCount = infinite)
+# - peekBulk($maxPeekCount = infinite)
+# - returnReadBulk($dataSet)
+
+# BufferBulkWriteCapability
+#   applicability: write buffers
+# Public API:
+# - writeBulk($dataSet)
+
+# BufferBulkStringReadCapability
+#   applicability: read buffers
+# Public API:
+# - readBulkString($maxReadCount = infinite, $throwOnImpossibleRead = false)
+# - peekBulkString($maxReadCount = infinite, $throwOnImpossibleRead = false)
+
+# BufferByteReadCapability
+#   applicability: read buffers
+# Public API:
+# - readBytes($count = infinite, $exact = false, $throwOnImpossibleRead = false)
+# - readBytesBulk($count = infinite, $maxReadCount = infinite, $exact = false, $throwOnImpossibleRead = false)
+
+# BufferDelimitedReadCapability
+#   applicability: read buffers
+# Public API:
+# - setDelimiter($delimiter, $caseInsensitive = false)
+# - readDelimited($maxLineLength = infinite, $strict = true, $stopOnEmptyLine = false, $throwOnImpossibleRead = false)
+# - readDelimitedBulk($maxLineLength = infinite, $maxReadCount = infinite, $strict = true, $stopOnEmptyLine = false, $throwOnImpossibleRead = false)
+
+# There are also some indicative capabilities that do not provide any extensions to the buffer but are informative about the buffer type
+
+# BufferMessageCapability
+# BufferDatagramCapability
+# BufferStreamCapability
+# BufferMixedStreamCapability
+
+# Some capabilities also provide specific internal API that is documented here
+
+# BufferByteReadCapability
+# - readBytesBulkInternal($count = infinite, $maxReadCount = infinite, $exact = false, $throwOnImpossibleRead = false, $forceArray = false)
+
+# BufferDelimitedReadCapability
+# - readDelimitedBulkInternal($maxLineLength = infinite, $maxReadCount = infinite, $strict = true, $stopOnEmptyLine = false, $throwOnImpossibleRead = false, $forceArray = false)
+
 ########
 # the very basic message/datagram buffer capability
 # provides base read(), peek(), returnRead()
@@ -99,7 +186,11 @@ trait TBufferByteSizeCapability
     protected function skbGetDataSize($data)
     {
         if ($data === null) throw new \UnexpectedValueException('Attempted to operate on null data block in the byte-sized socket buffer'); # cannot use nulls in the byte buffer
-        if (is_scalar($data)) return strlen($data); # strings and other scalars are just string byte count in size
+        if (is_scalar($data)) {
+            # strings and other scalars are just string byte count in size, except booleans that are not allowed
+            if (is_bool($data)) throw new \UnexpectedValueException('Attempted to operate on boolean data block in the buffer'); # cannot use booleans in the byte buffer
+            return strlen($data);
+        }
         if ($data instanceof \ATL\Sockets\ISizableByteBufferObject) return $data->skboGetSize(); # sizable byte buffer objects can get us their own size
         return 0; # anything not sizable does not count against the buffer size
     }
@@ -373,7 +464,8 @@ trait TBufferByteReadCapability
             }
 
             # now cut the active data remainder up to the data position, indicate we consumed all the blocks and continue the process
-            if ($streamPosition != 0) {
+            # do not shrink the scan buffer if we cannot cut it at least in half though
+            if (($streamPosition != 0) && ($streamPosition >= ($streamSize >> 1))) {
                 $stream = ($streamPosition != $streamSize) ? substr($stream, $streamPosition) : '';
                 $streamSize -= $streamPosition;
                 $streamPosition = 0;
@@ -449,8 +541,8 @@ interface IBufferDelimitedReadCapability extends IBufferBaseReadCapability, IBuf
     const SKB_SIZE_OPERATION_ADD_LEFT_DELIMITED_READ_REMAINDER = 0x0101; # additional operation hint code to indicate adding data remainder that does not affect our own scan operations
 
     public function setDelimiter($delimiter); # sets the delimiter to split delimited reads from the buffer by (socket side)
-    public function readDelimited($maxLineLength = PHP_INT_MAX, $throwOnImpossibleRead = false); # reads next string up to delimiter or maxLineLength bytes, the delimiter is also returned in result if encountered (socket side)
-    public function readDelimitedBulk($maxLineLength = PHP_INT_MAX, $maxReadCount = PHP_INT_MAX, $throwOnImpossibleRead = false); # reads up to maxReadCount strings in the same flavor readDelimited() does (socket side)
+    public function readDelimited($maxLineLength = PHP_INT_MAX, $strict = true, $stopOnEmptyLine = false, $throwOnImpossibleRead = false); # reads next string up to delimiter or maxLineLength bytes, the delimiter is also returned in result if encountered (socket side)
+    public function readDelimitedBulk($maxLineLength = PHP_INT_MAX, $maxReadCount = PHP_INT_MAX, $strict = true, $stopOnEmptyLine = false, $throwOnImpossibleRead = false); # reads up to maxReadCount strings in the same flavor readDelimited() does (socket side)
 
     # protected function readDelimitedInternal($maxLineLength = PHP_INT_MAX, $maxReadCount = PHP_INT_MAX, $strict = true, $throwOnImpossibleRead = false, $forceArray = false)
     # protected function skbDelimitedReadScanReset(); # resets delimited reads scan position (internal handler)
@@ -492,10 +584,10 @@ trait TBufferDelimitedReadCapability
         $this->skbDelimitedReadScanBufferPosition = 0;
     }
 
-    public function readDelimited($maxLineLength = PHP_INT_MAX, $strict = true, $throwOnImpossibleRead = false)
+    public function readDelimited($maxLineLength = PHP_INT_MAX, $strict = true, $stopOnEmptyLine = false, $throwOnImpossibleRead = false)
     {
         # readDelimited() is just a bulk read with maxReadCount=1 and forceArray=false, the only thing we need to check is impossible read as we want different exception text here
-        $result = $this->readDelimitedBulkInternal($maxLineLength, 1, $strict, false, false);
+        $result = $this->readDelimitedBulkInternal($maxLineLength, 1, $strict, $stopOnEmptyLine, false, false);
         if ($result === false) {
             # encountered impossible read that does not allow us to read literally anything, we need to throw or return false as well
             if ($throwOnImpossibleRead) throw new \LengthException("Cannot read delimited string because of special object present in the stream");
@@ -504,13 +596,13 @@ trait TBufferDelimitedReadCapability
         return $result;
     }
 
-    public function readDelimitedBulk($maxLineLength = PHP_INT_MAX, $maxReadCount = PHP_INT_MAX, $strict = true, $throwOnImpossibleRead = false)
+    public function readDelimitedBulk($maxLineLength = PHP_INT_MAX, $maxReadCount = PHP_INT_MAX, $strict = true, $stopOnEmptyLine = false, $throwOnImpossibleRead = false)
     {
         # readDelimitedBulk() is a direct alias of readDelimitedBulkInternal() with forceArray=true
-        return $this->readDelimitedBulkInternal($maxLineLength, $maxReadCount, $strict, $throwOnImpossibleRead, true);
+        return $this->readDelimitedBulkInternal($maxLineLength, $maxReadCount, $strict, $stopOnEmptyLine, $throwOnImpossibleRead, true);
     }
 
-    protected function readDelimitedBulkInternal($maxLineLength = PHP_INT_MAX, $maxReadCount = PHP_INT_MAX, $strict = true, $throwOnImpossibleRead = false, $forceArray = false)
+    protected function readDelimitedBulkInternal($maxLineLength = PHP_INT_MAX, $maxReadCount = PHP_INT_MAX, $strict = true, $stopOnEmptyLine = false, $throwOnImpossibleRead = false, $forceArray = false)
     {
         if ($maxReadCount <= 0) return $forceArray ? [] : ''; # requested zero count to read, return nothing
         if ($maxLineLength <= $this->skbDelimitedMaxReadDelimiterLength) $maxLineLength = $this->skbDelimitedMaxReadDelimiterLength; # requested weird maximum line length to be read, reset it to delimiter length
@@ -522,7 +614,7 @@ trait TBufferDelimitedReadCapability
             return $forceArray ? [] : '';
         }
 
-        $read = null; $readSize = 0; $readCount = 0;
+        $read = null; $readSize = 0; $readCount = 0; $endRead = false;
         $blockCount = 0; $removeCount = 0; $lastBlockRemainder = 0;
         $impossibleReadEncountered = false; # this flag is necessary to correctly alter non-strict mode behavior after the read
         foreach ($this->skbData as $data) {
@@ -590,19 +682,24 @@ trait TBufferDelimitedReadCapability
                     $this->skbDelimitedReadScanBufferPosition += $readLength; # move to the next scan position
                     $removeCount = $blockCount; # set block removal count to the current block count
                     $lastBlockRemainder = $this->skbDelimitedReadScanBufferLength - $this->skbDelimitedReadScanBufferPosition; # remember remainder size of the last block to return down
-                    if ($readCount == $maxReadCount) goto finishScan; # finish scanning if we read enough, but do not skip the persistent buffer shrink phase
+                    if (($readCount == $maxReadCount) || ($delimiterFound && ($readLength == $delimiterLength))) {
+                        # finish scanning if we read enough or when requested to stop at empty line and one is read, but do not skip the persistent buffer shrink phase
+                        $endRead = true;
+                        goto finishScan;
+                    }
                 }
 
 finishScan:
                 # now cut the active data remainder up to the data position and continue the process
-                if ($this->skbDelimitedReadScanBufferPosition != 0) {
+                # do not shrink the scan buffer if we cannot cut it at least in half though
+                if (($this->skbDelimitedReadScanBufferPosition != 0) && ($this->skbDelimitedReadLastScanPosition >= ($this->skbDelimitedReadScanBufferLength >> 1))) {
                     $this->skbDelimitedReadScanBuffer = ($this->skbDelimitedReadScanBufferPosition != $this->skbDelimitedReadScanBufferLength) ? substr($this->skbDelimitedReadScanBuffer, $this->skbDelimitedReadScanBufferPosition) : '';
                     $this->skbDelimitedReadScanBufferLength -= $this->skbDelimitedReadScanBufferPosition;
                     $this->skbDelimitedReadScanBufferPosition = 0;
                 }
 
-                # if we reached maximum read count, end the read
-                if ($readCount == $maxReadCount) goto endRead;
+                # if we are requested to end the read, end the read
+                if ($endRead) goto endRead;
             }
 
 nextBlock:

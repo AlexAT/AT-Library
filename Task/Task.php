@@ -5,12 +5,12 @@ namespace ATL;
 # Task object
 
 # This task object, despite being complex task loop handler, is designed to simplify any type task and subtask creation to one simple new object instantiation
-# you can do new \ATL\Task([...closure,object,generator,fiber...], ...$parameters) for task or subtask creation
-# just return created object if you want to provide your caller with a task to add to some task loop
+# you can do new \ATL\Task([generator,fiber], ...$parameters) for task or subtask creation, or use main() Generator (or Fiber-based code) inside your own Task object
 
 # need a new quick Generator task? think about new \ATL\Task([$myClass, 'myGenerator'], ...$parameters) instead of extending object
-# need a new quick Fiber task? think about new \ATL\Task(new \Fiber([$myClass, 'myFiber']), ...$parameters) instead of extending object
-# need a new object that extends Task and can be run? think about main() Generator or fiber() fiber methods instead of doing weird things in constructor
+# need a new quick Fiber task? think about new \ATL\Task([$myClass, 'myFiber'], ...$parameters) instead of extending object
+# need a new object that extends Task and can be run? think about main() Generator or Fiber-based methods instead of doing weird things in constructor
+# if main() is not a generator, it is considered to be Fiber-based method automatically so you do not need to indicate it otherwise
 
 # See TaskLoop for full task loop and objects implementation documentation
 
@@ -43,7 +43,9 @@ interface ITask
     const TASK_EXCEPTION_TERMINATE_STACK = 'terminateStack'; # a special mode that request terminating whole task stack if this task gets an exception, same for any child task exception propagated
     const TASK_EXCEPTION_RAISE_DOWN = 'raise'; # means task does not handle exceptions, and wants any of its own or child task exception to be re-raised back to TaskLoop
 
-    const taskAllowClosureAndObjectHandlers = false; # inherit and set to true to allow obscure Task variants like non-generator closures and objects with taskStart()/taskRun()/taskFinish() methods
+    const TASK_ACTIVE_HANDLER_GENERATOR = 0;
+    const TASK_ACTIVE_HANDLER_FIBER = 1;
+    const TASK_ACTIVE_HANDLER_STARTUP = 2;
 
     # Simplified control API aliases, start() also uses default task loop if not specified
 
@@ -54,8 +56,8 @@ interface ITask
 
     # Virtual task implementation API
 
-    # public function main(...$parameters); # provide main() generator function in child object to run as Generator-based task
-    # public function fiber(...$parameters); # provide fiber() function in child object to run run as Fiber-based task
+    # public function main(...$parameters); # provide main() generator or fiber method in child object to run as task, if it cannot be identified as Generator, it is considered to be Fiber-based code
+    # public function fiber(...$parameters); # for compatibility with older code: provide fiber() method in child object to run run as Fiber-based task
 
     # Task control API
 
@@ -86,12 +88,6 @@ interface ITask
     public function taskOnStartup($taskObject, &$parameters);
     public function taskOnTerminate($taskObject); # ...$parameters
     public function taskOnException($taskObject, $exceptionTaskObject, $exception);
-
-    # Self-handled Task API for when there is no handler (not allowed by default, set taskAllowClosureAndObjectHandlers to true to allow)
-
-    public function taskStart($taskObject); # ...$parameters
-    public function taskRun($interval);
-    public function taskFinish($taskObject); # ...$parameters
 
     # Internal Task API
     # Never use this API directly in your code because this API depends on TaskLoop implementation and is subject to change anytime, using or overriding it will also break TaskLoop handling of the task
@@ -133,8 +129,7 @@ trait TTask
     public $tlTaskParameters = []; # initial task parameters passed to constructor are exposed, but do not use them if you do not know what are you doing
     public $tlTaskPreciseMode; # indicates the task is precise task (TASK_PRECISE_TIMING_YES) or it wants precise interval once (TASK_PRECISE_TIMING_ONCE), null otherwise
     public $tlTaskExceptionMode; # indicates task exception handling mode
-                                 # null - propagate down the task stack if possible or re-raise down to TaskLoop if unhandled
-                                 #   for Generator and Fiber parent task handlers this results in child task exceptions being injected into parent task last yield/suspend point in hope it will be handled
+                                 # null - propagate down the task stack if possible or re-raise down to TaskLoop if unhandled, this results in child task exceptions being injected into parent task last yield/suspend point in hope it will be handled
                                  # true - continue on child exceptions, false - terminate on child exceptions, not injecting exception into the Task and stopping exception propagation
                                  # 'terminateStack' - terminate whole stack, 'raise' - explicitly re-raise exception down to TaskLoop
     public $tlTaskInjectException; # exception to throw into next task execution loop, valid only for Generator and Fiber type tasks, part of exception propagation in 'null' mode
@@ -143,7 +138,7 @@ trait TTask
     protected $tlNextTaskRunInterval; # interval remainder for next task run, zero means run immediately
     protected $tlLastTaskLoopTime; # last run time for precise interval calculation, not kept for timed tasks
     protected $tlActiveTaskHandler; # active task handler than is actually getting called
-    public $tlActiveTaskHandlerSpecial; # set to non-null (TASK_SPECIAL_HANDLER_*) on Generator and Fiber type handlers to indicate special handling, we need this public for exception re-throwing mechanism checks
+    protected $tlActiveTaskHandlerType; # internal active task handler type
     protected $tlActiveTaskFinishHandler; # set only for Object type tasks, contains task finish method
     protected $tlTaskOnTerminateHandlers = []; # list of handlers that would be called on task termination, as passed by options to the task constructor
     protected $tlActiveTaskOnTerminateHandlers = []; # active list of handlers that would be called on task termination, can be changed during task execution
@@ -170,18 +165,17 @@ trait TTask
         $this->taskResult = null;
 
         # convert handler from callable to closure if it is an array or string, and set it to current task handler
-        if ($handler === $this) $handler = null; # prevent one mistake that can easily be made when creating self handled tasks
+        if ($handler === $this) $handler = null; # silently amend one mistake that can easily be made, no passing self as Task handlers
         if (is_array($handler) || is_string($handler)) $handler = \ATL\Routines::callableToClosure($handler, true);
         if ($handler === null) {
-            # general easy way to create task objects is to just declare main() as Generator function or fiber() as Fiber function and it will be used as task handler
+            # general easy way to create task objects is to just declare main() as Generator or Fiber method or fiber() as Fiber method and it will be used as task handler
             if (method_exists($this, 'main')) {
                 $handler = \ATL\Routines::callableToClosure([$this, 'main'], true);
-                if (!(new \ReflectionFunction($handler))->isGenerator()) throw new \ATL\TaskLoopException("Task main() routine must be a generator function");
             } elseif ((PHP_VERSION_ID >= 80100) && method_exists($this, 'fiber')) {
                 $handler = new \Fiber([$this, 'fiber']);
             }
         }
-        if (($handler !== null) && !is_object($handler) && !is_callable($handler)) throw new \ATL\TaskLoopException("Attempted to create task with unsupported handler type");
+        if (($handler !== null) && !is_callable($handler) && !((PHP_VERSION_ID >= 80100) && $handler instanceof \Fiber)) throw new \ATL\TaskLoopException("Attempted to create task with unsupported handler type");
         $this->tlTaskHandler = $handler;
     }
 
@@ -193,12 +187,6 @@ trait TTask
     # Default onException handler
 
     public function taskOnException($taskObject, $exceptionTaskObject, $exception) { return $this->tlTaskExceptionMode; } # returns default exception mode set as result for any exception
-
-    # Self-handled task API for self-handled object-type task
-
-    public function taskStart($taskObject) { } # ...$parameters, self-handled task start handler does nothing by default
-    public function taskRun($interval) { throw new \ErrorException('Attempted to run Task without any defined handler'); } # self-handled task run handler throws exception by default to prevent coding errors
-    public function taskFinish($taskObject) { } # ...$parameters, self-handled task finish handler does nothing by default
 
     # Task overrides that are handled by Task to provide per-task parameters for tasks and subtasks instead of user defined ones when replacing active task handler by ourselves
     # You can override these in your child Task objects or object-handled tasks to provide some defaults for your task, just the method presence incurs override
@@ -440,7 +428,7 @@ trait TTask
         # set handler to task start handler and execute the loop calling it
         $this->taskLoop = $taskLoop; # set our task loop
         $this->tlActiveTaskHandler = [$this, 'tlTaskStartHandler']; # set our start handler as active handler, it is called once so we do not bother making it closure
-        $this->tlActiveTaskHandlerSpecial = null; # indicate our start handler is actually generator type handler
+        $this->tlActiveTaskHandlerType = self::TASK_ACTIVE_HANDLER_STARTUP; # indicate our start handler is actually generator type handler
         $this->tlActiveTaskFinishHandler = null; # reset current task finish handler to have none
         $this->tlNextTaskRunInterval = -1; # indicate we are going to do realtime run for the task start handler
         $taskPreciseMode = $this->tlTaskPreciseMode; # save task precision mode as we do not want task start to run in precise mode
@@ -461,81 +449,57 @@ trait TTask
     public function tlTaskStartHandler()
     {
         # perform the initialization depending on task handler type
-        if ($this->tlTaskHandler === null) {
-            # object based handlers are prone to work wrong when used improperly, disallow them
-            if (!$this::taskAllowClosureAndObjectHandlers) throw new \ATL\TaskLoopException("Self-handled object type tasks cannot be used anymore, use Generator main() or Fiber fiber() methods instead (or modify taskAllowClosureAndObjectHandlers if really necessary)");
+        if ($this->tlTaskHandler === null) throw new \ATL\TaskLoopException("No valid task handler specified to the Task object");
 
-            # self-handled Task
-            $this->tlActiveTaskHandler = \ATL\Routines::callableToClosure([$this, 'taskRun'], true); # set active task handler to our own internal taskRun handler
-            $this->tlActiveTaskHandlerSpecial = null; # this task handler has no special handling
-            $this->tlActiveTaskFinishHandler = \ATL\Routines::callableToClosure([$this, 'taskFinish'], true); # set active task finish handler to our own internal finish handler
-            $this->taskOnStartup($this, $this->taskParameters); # call our own taskOnStartup handler, this is the only chance to adjust parameters on the fly
-            $this->taskStart($this, ...$this->taskParameters);
-            return true; # object handled tasks do not process taskStart result and just start executing loop instead
-        } elseif (($this->tlTaskHandler instanceof \Closure) || is_array($this->tlTaskHandler) || is_string($this->tlTaskHandler)) {
-            # closures (and callables) may be generator closures, we need to verify this and handle generator type closures (callables) differently, using generator itself and not the closure (callable) as task
+        # check if the handler is of closure/callback type
+        if (($this->tlTaskHandler instanceof \Closure) || is_callable($this->tlTaskHandler) || is_array($this->tlTaskHandler) || is_string($this->tlTaskHandler)) {
+            # closures (and callables) may be generators, we need to verify this and handle generator type closures (callables) if so, otherwise it will be considered a Fiber task
             $reflection = new \ReflectionFunction($this->tlTaskHandler);
             if ($reflection->isGenerator()) {
                 # yes, initialize task by calling closure, set generator task handler and execute generator up to the first yield
                 $this->taskOnStartup($this, $this->taskParameters); # call our own taskOnStartup handler, this is the only chance to adjust parameters on the fly
                 $activeGenerator = $this->tlActiveTaskHandler = ($this->tlTaskHandler)($this, ...$this->taskParameters); # we need to hold current generator in the local variable because local properties one can change during run
-                $this->tlActiveTaskHandlerSpecial = 'Generator'; # indicate we are to use special handler from there
+                $this->tlActiveTaskHandlerType = self::TASK_ACTIVE_HANDLER_GENERATOR;
                 if (!($activeGenerator instanceof \Generator)) throw new \ErrorException("Expected Generator from generator type Closure, but received something else"); # internal assertion just in case we get something else (should not happen)
                 if ($activeGenerator->valid()) return $activeGenerator->current(); # Generator started
                 # we need to terminate the task being started if Generator is terminated just during start
                 $this->taskResult = $activeGenerator->getReturn(); # retrieve result immediately if Generator terminated right on start
-                return 'terminate';
+                $this->tlActiveTaskHandlerType = self::TASK_ACTIVE_HANDLER_STARTUP; # back to the startup handler
+                $this->tlActiveTaskHandler = [$this, 'tlTaskStartTerminateHandler']; # install delayed termination handler
+                return true; # reschedule us immediately for termination
             } else {
-                # closure handlers are prone to code hanging when occasionally used instead of Generator, disallow them
-                if (!$this::taskAllowClosureAndObjectHandlers) throw new \ATL\TaskLoopException("Simple closures cannot be used as task handlers anymore, use generator function instead (or modify taskAllowClosureAndObjectHandlers if really necessary)");
-
-                # no, continue with closure handler, initialize by calling with null interval and additional parameters
-                $this->tlActiveTaskHandler = $this->tlTaskHandler; # use closure as is
-                $this->tlActiveTaskHandlerSpecial = null; # this task handler has no special handling
-                $this->taskOnStartup($this, $this->taskParameters); # call our own taskOnStartup handler, this is the only chance to adjust parameters on the fly
-                return ($this->tlActiveTaskHandler)(null, $this, ...$this->taskParameters);
+                if (PHP_VERSION_ID >= 80100) {
+                    # initialize as Fiber task handler
+                    $this->tlTaskHandler = new \Fiber($this->tlTaskHandler);
+                } else {
+                    throw new \ATL\TaskLoopException("Non-generator task handler specified to the Task object, but there is no Fiber support in this PHP version");
+                }
             }
-        } elseif ((PHP_VERSION_ID >= 80100) && ($this->tlTaskHandler instanceof \Fiber)) {
+        }
+
+        # check if the handler is of Fiber type (can also be converted from the closure above)
+        if ((PHP_VERSION_ID >= 80100) && ($this->tlTaskHandler instanceof \Fiber)) {
             # Fiber task handlers are initialized and the active handler is set to internal Fiber handler due to need of termination check
             $activeFiber = $this->tlActiveTaskHandler = $this->tlTaskHandler;
-            $this->tlActiveTaskHandlerSpecial = 'Fiber'; # indicate we are to use special handler from there
+            $this->tlActiveTaskHandlerType = self::TASK_ACTIVE_HANDLER_FIBER; # indicate we are to use special handler for Fiber from there
             $this->taskOnStartup($this, $this->taskParameters); # call our own taskOnStartup handler, this is the only chance to adjust parameters on the fly
             $result = $activeFiber->isStarted() ? null : $activeFiber->start($this, ...$this->taskParameters);
             if (!$activeFiber->isTerminated()) return $result; # Fiber started
             # we need to terminate the task being started if Fiber is terminated just during start
             $this->taskResult = $activeFiber->getReturn(); # retrieve result immediately if Fiber terminated right on start
-            return 'terminate';
-        } elseif ($this->tlTaskHandler instanceof \Generator) {
-            # pure generator handlers are executed up to first yield on startup (this is the worst task type to use, also a type that cannot be started again, but well, exists for completeness)
-            $activeGenerator = $this->tlActiveTaskHandler = $this->tlTaskHandler; # we need to hold current generator in the local variable because local properties can change during run
-            $this->tlActiveTaskHandlerSpecial = 'Generator'; # indicate we are to use special handler from there
-            $this->taskOnStartup($this, $this->taskParameters); # call our own taskOnStartup handler, this is the only chance to adjust parameters on the fly
-            if ($activeGenerator->valid()) return $activeGenerator->current(); # Generator started
-            # we need to terminate the task being started if Generator is terminated just during start
-            $this->taskResult = $activeGenerator->getReturn(); # retrieve result immediately if Generator terminated right on start
-            return 'terminate';
-        } elseif (is_object($this->tlTaskHandler)) {
-            # object task handler must not be an ITask
-            if ($this->tlTaskHandler instanceof ITask) throw new \ATL\TaskLoopException("Task objects cannot be used as task handlers, use self-handled Task objects instead");
-
-            # object based handlers are prone to work wrong when used improperly, disallow them
-            if (!$this::taskAllowClosureAndObjectHandlers) throw new \ATL\TaskLoopException("Method-handled object type tasks cannot be used anymore, use \\ATL\\Task objects with Generator main() or Fiber fiber() methods instead (or modify taskAllowClosureAndObjectHandlers if really necessary)");
-
-            # object task handlers must have taskRun method
-            if (!method_exists($this->tlTaskHandler, 'taskRun')) throw new \ATL\TaskLoopException("Attempted to create task from object without taskRun() method");
-            $this->tlActiveTaskHandler = \ATL\Routines::callableToClosure([$this->tlTaskHandler, 'taskRun'], true); # set active handler to object taskRun method
-            $this->tlActiveTaskHandlerSpecial = null; # this task handler has no special handling
-            # set active task finish handler to object finish handler if it exists
-            if (method_exists($this->tlTaskHandler, 'taskFinish')) $this->tlActiveTaskFinishHandler = \ATL\Routines::callableToClosure([$this->tlTaskHandler, 'taskFinish'], true);
-            # call our own taskOnStartup handler, this is the only chance to adjust parameters on the fly
-            $this->taskOnStartup($this, $this->taskParameters);
-            # call taskStart method if it exists, immediately execute task run method on the next loop otherwise
-            return method_exists($this->tlTaskHandler, 'taskStart') ? $this->tlTaskHandler->taskStart($this, ...$this->taskParameters) : true;
-        } else {
-            # unknown task handler type
-            throw new \ErrorException("Attempted to start task with unsupported handler type");
+            $this->tlActiveTaskHandlerType = self::TASK_ACTIVE_HANDLER_STARTUP; # back to the startup handler
+            $this->tlActiveTaskHandler = [$this, 'tlTaskStartTerminateHandler']; # install delayed termination handler
+            return true; # reschedule us immediately for termination
         }
+
+        # unknown task handler type
+        throw new \ErrorException("Attempted to start Task with unsupported handler type");
     }
+
+    # this terminate handler is called delayed if the task terminated right on startup
+    # why is that? because when we add the task, we may also set some terminate handlers that still may need to be called
+    # if we terminate right away in the start handler, these will never get set and so never be used in the task termination process
+    protected function tlTaskStartTerminateHandler() { return 'terminate'; }
 
     # main routine that runs in TaskLoop main loop and executes the task as scheduled
     public function tlTaskLoopCycle($interval)
@@ -577,45 +541,49 @@ trait TTask
 
         # execute active task handler
         try {
-            # take care: comparing with switch to string constants is much more effective in PHP than same switch to class constants
-            if ($this->tlActiveTaskHandlerSpecial !== null) {
-                switch ($this->tlActiveTaskHandlerSpecial) {
-                    case 'Generator':
-                    # optimized special handler for Generator, we need to check for generator termination if the result is null
-                    if ($this->tlTaskInjectException === null) {
-                        if ((($result = $this->tlActiveTaskHandler->send(($this->tlTaskSubtaskResult === null) ? $this->taskLastInterval : $this->tlTaskSubtaskResult->value)) === null) && !$this->tlActiveTaskHandler->valid()) {
-                            $this->taskResult = $this->tlActiveTaskHandler->getReturn(); # retrieve task result from Generator return
-                            $result = 'terminate';
-                        }
-                    } else {
-                        # inject exception, otherwise the same as normal send
-                        if ((($result = $this->tlActiveTaskHandler->throw($this->tlTaskInjectException)) === null) && !$this->tlActiveTaskHandler->valid()) {
-                            $this->taskResult = $this->tlActiveTaskHandler->getReturn(); # retrieve task result from Generator return
-                            $result = 'terminate';
-                        }
-                        $this->tlTaskInjectException = null;
+            # take care: $this::const is very slow compared to self::const, so avoid $this::const in the loop that tight
+            switch ($this->tlActiveTaskHandlerType) {
+                case self::TASK_ACTIVE_HANDLER_GENERATOR:
+                # optimized special handler for generator, we need to check for generator termination if the result is null
+                if ($this->tlTaskInjectException === null) {
+                    if ((($result = $this->tlActiveTaskHandler->send(($this->tlTaskSubtaskResult === null) ? $this->taskLastInterval : $this->tlTaskSubtaskResult->value)) === null) && !$this->tlActiveTaskHandler->valid()) {
+                        $this->taskResult = $this->tlActiveTaskHandler->getReturn(); # retrieve task result from Generator return
+                        $result = 'terminate';
                     }
-                    break;
-
-                    case 'Fiber':
-                    # optimized special handler for Fiber, we need to check for generator termination if the result is null
-                    if ($this->tlTaskInjectException === null) {
-                        if ((($result = $this->tlActiveTaskHandler->resume(($this->tlTaskSubtaskResult === null) ? $this->taskLastInterval : $this->tlTaskSubtaskResult->value)) === null) && $this->tlActiveTaskHandler->isTerminated()) {
-                            $this->taskResult = $this->tlActiveTaskHandler->getReturn(); # retrieve task result from Fiber return
-                            $result = 'terminate';
-                        }
-                    } else {
-                        # inject exception, otherwise the same as normal send
-                        if ((($result = $this->tlActiveTaskHandler->throw($this->tlTaskInjectException)) === null) && $this->tlActiveTaskHandler->isTerminated()) {
-                            $this->taskResult = $this->tlActiveTaskHandler->getReturn(); # retrieve task result from Fiber return
-                            $result = 'terminate';
-                        }
-                        $this->tlTaskInjectException = null;
+                } else {
+                    # inject exception, otherwise the same as normal send
+                    if ((($result = $this->tlActiveTaskHandler->throw($this->tlTaskInjectException)) === null) && !$this->tlActiveTaskHandler->valid()) {
+                        $this->taskResult = $this->tlActiveTaskHandler->getReturn(); # retrieve task result from Generator return
+                        $result = 'terminate';
                     }
-                    break;
+                    $this->tlTaskInjectException = null;
                 }
-            } else {
-                $result = ($this->tlActiveTaskHandler)(($this->tlTaskSubtaskResult === null) ? $this->taskLastInterval : $this->tlTaskSubtaskResult->value);
+                break;
+
+                case self::TASK_ACTIVE_HANDLER_FIBER:
+                # optimized special handler for Fiber, we need to check for Fiber termination if the result is null
+                if ($this->tlTaskInjectException === null) {
+                    if ((($result = $this->tlActiveTaskHandler->resume(($this->tlTaskSubtaskResult === null) ? $this->taskLastInterval : $this->tlTaskSubtaskResult->value)) === null) && $this->tlActiveTaskHandler->isTerminated()) {
+                        $this->taskResult = $this->tlActiveTaskHandler->getReturn(); # retrieve task result from Fiber return
+                        $result = 'terminate';
+                    }
+                } else {
+                    # inject exception, otherwise the same as normal send
+                    if ((($result = $this->tlActiveTaskHandler->throw($this->tlTaskInjectException)) === null) && $this->tlActiveTaskHandler->isTerminated()) {
+                        $this->taskResult = $this->tlActiveTaskHandler->getReturn(); # retrieve task result from Fiber return
+                        $result = 'terminate';
+                    }
+                    $this->tlTaskInjectException = null;
+                }
+                break;
+
+                case self::TASK_ACTIVE_HANDLER_STARTUP:
+                # task start handler
+                $result = ($this->tlActiveTaskHandler)();
+                break;
+
+                default:
+                throw new \ErrorException("Attempted to run Task with unsupported active handler type");
             }
             $this->taskLastInterval = 0; # reset accumulated interval after task run
             $this->tlTaskSubtaskResult = null; # reset subtask result after task run
@@ -674,9 +642,10 @@ trait TTask
         }
 
         # rare string-based manual scheduling and termination cases
-        if (($result === 'wait') || ($result === 'manual')) return $this->tlTaskLoopBecomeManuallyScheduled();
-        if (($result === 'terminate') || ($result === 'terminated')) return $this->tlTaskLoopTerminate();
-        if ($result === 'terminateStack') {
+        switch ($result) {
+            case 'wait': case 'manual': return $this->tlTaskLoopBecomeManuallyScheduled();
+            case 'terminate': case 'terminated': return $this->tlTaskLoopTerminate();
+            case 'terminateStack':
             $this->taskLoop->terminateTaskStack($this, false, false); # forcibly is set to false to keep the task result
             return -1; # some tasks could be waiting for termination, so make scheduler do next loop immediately
         }
@@ -708,11 +677,12 @@ trait TTask
         while (($victimTask = $victimTask->tlTaskGetPreviousStackedTask()) !== null) { # obtain previous task in stack
             $mode = $victimTask->taskOnException($victimTask, $this, $exception); # inform its exception handler and get victim task modus operandi
             if ($mode === null) {
-                # victim Task dictates us to use normal exception handling path, check if it is handled by Generator or Fiber we can re-throw exception into
-                switch ($victimTask->tlActiveTaskHandlerSpecial) {
-                    case 'Generator':
-                    case 'Fiber':
-                    $this->taskLoop->terminateTaskStack($victimTask->tlTaskGetNextStackedTask(), false, true, true); # terminate victim child and everything above as we are going to re-throw the exception into victim task
+                # exception re-throwing can only happen inside normal Generator/Fiber handling, it can't i.e. happen inside startup handlers
+                switch ($this->tlActiveTaskHandlerType) {
+                    case self::TASK_ACTIVE_HANDLER_GENERATOR:
+                    case self::TASK_ACTIVE_HANDLER_FIBER:
+                    # victim Task dictates us to use normal exception handling path, we need to re-throw exception into the victim task
+                    $this->taskLoop->terminateTaskStack($victimTask->tlTaskGetNextStackedTask(), false, true, true); # terminate victim child and everything above as we are going to re-throw the exception
                     $victimTask->tlTaskInjectException = $exception; # set exception to inject into task handler on next scheduling interval
                     return -1;
                 }

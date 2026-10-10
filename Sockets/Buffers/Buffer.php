@@ -624,6 +624,7 @@ trait TBuffer
     # calling order: parents are not expected to be called, first to last if necessary, parents should be called first
     protected function skbGetDataSize($data)
     {
+        if (is_bool($data)) throw new \UnexpectedValueException('Attempted to operate on boolean data block in the buffer'); # cannot use booleans in the byte buffer
         return 1; # just count of buffer elements following skbCount
     }
 
