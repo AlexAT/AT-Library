@@ -84,7 +84,7 @@ class LongFloat
                     $decPart = rtrim($m[3], '0');
                     if (($intPart === '') && ($decPart === '')) $intPart = '0'; # corner case for zeros
                     $this->numerator = gmp_init($m[1].$intPart.$decPart, 10);
-                    $this->denominator = $this::$multipliers[$decimals = strlen($decPart)] ?? $this->getMultiplier($decimals);
+                    $this->denominator = self::$multipliers[$decimals = strlen($decPart)] ?? $this->getMultiplier($decimals);
                 } else {
                     throw new \InvalidArgumentException("The value supplied cannot be converted to number");
                 }
@@ -470,8 +470,8 @@ class LongFloat
 
         if ($arg > 0) {
             # here is the precision issue, pre-multiply both our numerator and denominator by maxDecimals+1 in the given power to ensure there is no precision loss below maxDecimals
-            $this->numerator = gmp_mul($this->numerator, gmp_pow($this::$multipliers[$precision = $this->maxDecimals + 1] ?? $this->getMultiplier($precision), $arg));
-            $this->denominator = gmp_mul($this->denominator, gmp_pow($this::$multipliers[$precision], $arg));
+            $this->numerator = gmp_mul($this->numerator, gmp_pow(self::$multipliers[$precision = $this->maxDecimals + 1] ?? $this->getMultiplier($precision), $arg));
+            $this->denominator = gmp_mul($this->denominator, gmp_pow(self::$multipliers[$precision], $arg));
 
             if ($arg == 2) {
                 # the square root is optimized
@@ -487,8 +487,8 @@ class LongFloat
             $arg = -$arg;
 
             # here is the precision issue, pre-multiply both our numerator and denominator by maxDecimals+1 in the given power to ensure there is no precision loss below maxDecimals
-            $this->numerator = gmp_mul($this->numerator, gmp_pow($this::$multipliers[$precision = $this->maxDecimals + 1] ?? $this->getMultiplier($precision), $arg));
-            $this->denominator = gmp_mul($this->denominator, gmp_pow($this::$multipliers[$precision], $arg));
+            $this->numerator = gmp_mul($this->numerator, gmp_pow(self::$multipliers[$precision = $this->maxDecimals + 1] ?? $this->getMultiplier($precision), $arg));
+            $this->denominator = gmp_mul($this->denominator, gmp_pow(self::$multipliers[$precision], $arg));
 
             $numerator = $this->numerator;
             if ($arg == 2) {
@@ -523,7 +523,7 @@ class LongFloat
         # rounding is also simple: we multiply our numerator by the target precision required * 10, and then divide by existing denominator * 10
         # to see if the rounding is necessary, we compare remainder of the operation to 0 (nothing to round) and then to existing denominator multiplied by 5 to check if we are at the half of the range
         $this->numerator = $this->getRoundedValue($this->numerator, $this->denominator, $decimals = $decimals ?? $this->maxDecimals, $rounding ?? $this->rounding);
-        $this->denominator = $this::$multipliers[$decimals] ?? $this->getMultiplier($decimals);
+        $this->denominator = self::$multipliers[$decimals] ?? $this->getMultiplier($decimals);
 
         # the rounding was simple, now we need to also try to compand if autocompand is enabled
         return $this->autoCompand ? $this->compand() : $this;
@@ -532,7 +532,7 @@ class LongFloat
     public function checkRound($decimals = null, $rounding = null)
     {
         # if our denominator is less than or equal to the precision required, we do nothing, otherwise we do the rounding
-        return (gmp_cmp($this->denominator, $this::$multipliers[$decimals = $decimals ?? $this->maxDecimals] ?? $this->getMultiplier($decimals)) <= 0) ? $this : $this->round($decimals, $rounding);
+        return (gmp_cmp($this->denominator, self::$multipliers[$decimals = $decimals ?? $this->maxDecimals] ?? $this->getMultiplier($decimals)) <= 0) ? $this : $this->round($decimals, $rounding);
     }
 
     public function compand()
@@ -556,7 +556,7 @@ class LongFloat
     public function checkCompand()
     {
         # if our denominator is less than or equal to the precision required, we do nothing, otherwise we do the companding
-        return (gmp_cmp($this->denominator, $this::$multipliers[$decimals = $decimals ?? $this->maxDecimals] ?? $this->getMultiplier($decimals)) <= 0) ? $this : $this->compand();
+        return (gmp_cmp($this->denominator, self::$multipliers[$decimals = $decimals ?? $this->maxDecimals] ?? $this->getMultiplier($decimals)) <= 0) ? $this : $this->compand();
     }
 
     # like compare operation, this can operate at specific precision and rounding type if needed
@@ -584,7 +584,7 @@ class LongFloat
         } else {
             # check at the precision specified
             $value = $this->getRoundedValue($this->numerator, $this->denominator, $decimals = $decimals ?? $this->maxDecimals, $rounding ?? $this->rounding);
-            return !gmp_sign(gmp_div_r($value, $this::$multipliers[$decimals] ?? $this->getMultiplier($decimals)));
+            return !gmp_sign(gmp_div_r($value, self::$multipliers[$decimals] ?? $this->getMultiplier($decimals)));
         }
     }
 
@@ -628,17 +628,43 @@ class LongFloat
         return $this->toString();
     }
 
+
+    # PI calculation (Chudnovsky, binary splitting) with current max decimals
     public function pi()
     {
-        # PI calculation (Gauss-Legendre) with current max decimals
+        list($p, $q, $t) = $this->piChudRound(0, ceil($this->maxDecimals / log(151931373056000, 10)) + 1); # const = 640320^3 / 24 / 72
+        return $this->set(10005)->sqrt()->mul($q)->mul(426880)->div($t)->round();
+    }
+
+    protected function piChudRound($a, $b)
+    {
+        # uses GMP directly as these are all integer calculations
+        if (($b - $a) == 1) {
+            if ($a == 0) return [1, 1, 13591409];
+            return [
+                $Pab = gmp_mul(($a6 = $a * 6) - 5, gmp_mul($a6 - 1, $a * 2 - 1)), # P(a,b) = (6 * a - 5) * (6 * a - 1) * (2 * a - 1)
+                gmp_mul(gmp_pow($a, 3), 10939058860032000), # Q(a,b) = (640320^3 / 24) * a^3
+                ($a & 1) ? gmp_mul($Pab, gmp_add(gmp_mul(-545140134, $a), -13591409)) : gmp_mul($Pab, gmp_add(gmp_mul(545140134, $a), 13591409)) # T(a,b) = +/- P(a,b) * (a * 545140134 + 13591409)
+            ];
+        } else {
+            $m = ($a + $b) >> 1;
+            list($Pam, $Qam, $Tam) = $this->piChudRound($a, $m);
+            list($Pmb, $Qmb, $Tmb) = $this->piChudRound($m, $b);
+            return [gmp_mul($Pam, $Pmb), gmp_mul($Qam, $Qmb), gmp_add(gmp_mul($Qmb, $Tam), gmp_mul($Pam, $Tmb))];
+        }
+    }
+
+    # PI calculation (Gauss-Legendre) with current max decimals
+    public function piGL()
+    {
         $loops = ceil(log($this->maxDecimals + 1, 2));
         $decimals = $this->maxDecimals + $loops; # the number of guard digits is roughly equivalent to the number of loops
 
         # do the math
-        $a = new $this(1, $decimals, $this::ROUND_MATH, false, true);
-        $b = (new $this(2, $decimals, $this::ROUND_MATH, false, true))->sqrt()->divRev(1);
-        $t = new $this("0.25", $decimals, $this::ROUND_MATH, false, true);
-        $p = new $this(1, $decimals, $this::ROUND_MATH, false, true);
+        $a = new $this(1, $decimals, self::ROUND_MATH, false, true);
+        $b = (new $this(2, $decimals, self::ROUND_MATH, false, true))->sqrt()->divRev(1);
+        $t = new $this("0.25", $decimals, self::ROUND_MATH, false, true);
+        $p = new $this(1, $decimals, self::ROUND_MATH, false, true);
         for ($i = 0; $i < $loops; $i++) {
             $aPrev = clone $a; # aPrev = a
             $a->add($b)->div(2); # a = (a + b) / 2
@@ -655,14 +681,14 @@ class LongFloat
     # this one gets rounded numerator value for specific decimal precision and rounding
     protected function getRoundedValue($numerator, $denominator, $decimals, $rounding)
     {
-        list($value, $remainder) = gmp_div_qr(gmp_mul($numerator, $this::$multipliers[$precision = $decimals + 1] ?? $this->getMultiplier($precision)), gmp_mul($denominator, 10), GMP_ROUND_ZERO);
+        list($value, $remainder) = gmp_div_qr(gmp_mul($numerator, self::$multipliers[$precision = $decimals + 1] ?? $this->getMultiplier($precision)), gmp_mul($denominator, 10), GMP_ROUND_ZERO);
         if (gmp_sign($remainder = gmp_abs($remainder))) {
             switch ($rounding) {
-                case $this::ROUND_MATH: $add = (gmp_cmp($remainder, gmp_mul($denominator, 5)) >= 0) ? ((gmp_sign($numerator) >= 0) ? 1 : -1) : null; break;
-                case $this::ROUND_FLOOR: $add = (gmp_sign($numerator) >= 0) ? null : -1; break;
-                case $this::ROUND_CEIL: $add = (gmp_sign($numerator) >= 0) ? 1 : null; break;
-                case $this::ROUND_TRUNC: $add = null; break;
-                case $this::ROUND_SPREAD: $add = (gmp_sign($numerator) >= 0) ? 1 : -1; break;
+                case self::ROUND_MATH: $add = (gmp_cmp($remainder, gmp_mul($denominator, 5)) >= 0) ? ((gmp_sign($numerator) >= 0) ? 1 : -1) : null; break;
+                case self::ROUND_FLOOR: $add = (gmp_sign($numerator) >= 0) ? null : -1; break;
+                case self::ROUND_CEIL: $add = (gmp_sign($numerator) >= 0) ? 1 : null; break;
+                case self::ROUND_TRUNC: $add = null; break;
+                case self::ROUND_SPREAD: $add = (gmp_sign($numerator) >= 0) ? 1 : -1; break;
                 default: $add = (gmp_cmp($remainder, gmp_mul($denominator, 5)) >= 0) ? ((gmp_sign($numerator) >= 0) ? 1 : -1) : null; break;
             }
             if ($add !== null) return gmp_add($value, $add); # compensate if necessary
@@ -672,8 +698,8 @@ class LongFloat
 
     protected function getMultiplier($decimals)
     {
-        if (($multiplier = $this::$multipliers[$decimals] ?? null) !== null) return $multiplier;
-        return $this::$multipliers[$decimals] = ($decimals <= 18) ? pow(10, $decimals) : gmp_pow(10, $decimals); # initialize new decimal multiplier, integer for <10E18 (64-bit)
+        if (($multiplier = self::$multipliers[$decimals] ?? null) !== null) return $multiplier;
+        return self::$multipliers[$decimals] = ($decimals <= 18) ? pow(10, $decimals) : gmp_pow(10, $decimals); # initialize new decimal multiplier, integer for <10E18 (64-bit)
     }
 
     public function __debugInfo()
@@ -689,11 +715,11 @@ class LongFloat
         ];
 
         switch ($this->rounding) {
-            case $this::ROUND_MATH: $out['rounding'] = 'MATH'; break;
-            case $this::ROUND_FLOOR: $out['rounding'] = 'FLOOR'; break;
-            case $this::ROUND_CEIL: $out['rounding'] = 'CEIL'; break;
-            case $this::ROUND_TRUNC: $out['rounding'] = 'TRUNC'; break;
-            case $this::ROUND_SPREAD: $out['rounding'] = 'SPREAD'; break;
+            case self::ROUND_MATH: $out['rounding'] = 'MATH'; break;
+            case self::ROUND_FLOOR: $out['rounding'] = 'FLOOR'; break;
+            case self::ROUND_CEIL: $out['rounding'] = 'CEIL'; break;
+            case self::ROUND_TRUNC: $out['rounding'] = 'TRUNC'; break;
+            case self::ROUND_SPREAD: $out['rounding'] = 'SPREAD'; break;
         }
 
         return $out;
