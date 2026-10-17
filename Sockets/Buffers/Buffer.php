@@ -17,244 +17,244 @@ namespace ATL\Sockets;
 # Constructor
 
 # - __construct($id, $socket, $parameters = [])
-#     standard buffer constructor just remembers its own SPL ID for internal operations and initializes the buffer
-#     id contains the ID assigned to the buffer by the socket (i.e. 0 for default read or write buffer)
-#     socket contains socket object reference (not used in the base implementation, but technically may be used in child implementations)
-#     parameters contain array of predefined parameter keys and their values for skbReadParameters()
+    # standard buffer constructor just remembers its own SPL ID for internal operations and initializes the buffer
+    # id contains the ID assigned to the buffer by the socket (i.e. 0 for default read or write buffer)
+    # socket contains socket object reference (not used in the base implementation, but technically may be used in child implementations)
+    # parameters contain array of predefined parameter keys and their values for skbReadParameters()
 
 # Public data state API
 # take care than in internal data operations involving noSizeUpdate=true, this one will not reflect the changes until the size is updated
 
 # - getCount()
-#     returns count of the data elements (chunks/objects) currently residing in buffer, returning zero means the buffer is empty
+    # returns count of the data elements (chunks/objects) currently residing in buffer, returning zero means the buffer is empty
 # - getSize()
-#     returns size of the data currently residing in buffer, for base buffer this is equivalent to getCount(), but i.e. for byte buffers it is byte size of the data held
-#     take care some buffer data objects can be zero-sized, and so even if i.e. getSize() returns zero, the buffer may still be not empty and have something extra to read
+    # returns size of the data currently residing in buffer, for base buffer this is equivalent to getCount(), but i.e. for byte buffers it is byte size of the data held
+    # take care some buffer data objects can be zero-sized, and so even if i.e. getSize() returns zero, the buffer may still be not empty and have something extra to read
 # - hasData()
-#     returns true if buffer contains some data, false otherwise
+    # returns true if buffer contains some data, false otherwise
 # - isEmpty()
-#     an opposite of hasData(), returns true if buffer is empty, false otherwise
+    # an opposite of hasData(), returns true if buffer is empty, false otherwise
 # - isFull()
-#     returns true if size of data held in buffer equals to or exceeds maximum buffer size, false otherwise
+    # returns true if size of data held in buffer equals to or exceeds maximum buffer size, false otherwise
 # - isAboveLowWatermark()
-#     returns true if size of data held in buffer equals to or exceeds low watermark set, false otherwise
+    # returns true if size of data held in buffer equals to or exceeds low watermark set, false otherwise
 # - isBelowHighWatermark()
-#     returns true if size of data held in buffer is below high watermark set, false otherwise
+    # returns true if size of data held in buffer is below high watermark set, false otherwise
 
 # Public buffer state API
 
 # - isBeforeOpen()
-#     returns true if buffer has still not reached opening state (state <= 'opening'), false otherwise
-#     basically indicates the buffer has not initialized transport yet ever
+    # returns true if buffer has still not reached opening state (state <= 'opening'), false otherwise
+    # basically indicates the buffer has not initialized transport yet ever
 # - isOpening()
-#     returns true if buffer is opening ('opening' <= state < 'open'), false otherwise
-#     indicates the buffer is initializing transport connection
+    # returns true if buffer is opening ('opening' <= state < 'open'), false otherwise
+    # indicates the buffer is initializing transport connection
 # - isOpen()
-#     returns true if buffer is open ('open' <= state < 'closing'), false otherwise
-#     indicates the transport connection is opened and the buffer is ready for data operatons
+    # returns true if buffer is open ('open' <= state < 'closing'), false otherwise
+    # indicates the transport connection is opened and the buffer is ready for data operatons
 # - isWriteable()
-#     returns true if buffer can still accept writes from the socket ('open' <= state < 'closed'), false otherwise
-#     usable for write buffers, indicates socket can still add more write data to the buffer because transport has not yet completed the flush/close operation
+    # returns true if buffer can still accept writes from the socket ('open' <= state < 'closed'), false otherwise
+    # usable for write buffers, indicates socket can still add more write data to the buffer because transport has not yet completed the flush/close operation
 # - isClosing()
-#     returns true if buffer is closing ('closing' <= state < 'closed'), false otherwise
-#     indicates the transport connection is readying to close (i.e. flushing write data for write buffers) and the buffer operations will terminate soon
+    # returns true if buffer is closing ('closing' <= state < 'closed'), false otherwise
+    # indicates the transport connection is readying to close (i.e. flushing write data for write buffers) and the buffer operations will terminate soon
 # - isClosed()
-#     returns true if buffer is closed (closed or aborted, state >= 'closed')
-#     basically indicates the buffer has completed or terminated all transport operations
+    # returns true if buffer is closed (closed or aborted, state >= 'closed')
+    # basically indicates the buffer has completed or terminated all transport operations
 # - isAborted()
-#     returns true if buffer is aborted (state >= 'aborted')
-#     indicates buffer did not terminate transport operations gracefully, but aborted them abruptly
+    # returns true if buffer is aborted (state >= 'aborted')
+    # indicates buffer did not terminate transport operations gracefully, but aborted them abruptly
 # - isActive()
-#     returns true if the buffer is actively performing some operations ('opening' <= state < 'closed'), false otherwise
-#     basically indicates buffer is not waiting for either being open or destroyed, but progressing with connection/disconnection or data operations
+    # returns true if the buffer is actively performing some operations ('opening' <= state < 'closed'), false otherwise
+    # basically indicates buffer is not waiting for either being open or destroyed, but progressing with connection/disconnection or data operations
 
 # Other public API
 
 # - setEventReadMode($enabled = false)
-#     enables or disables event-based read mode for the buffer
-#     when event-based read mode is enabled, all existing data from the left side of the buffer (and all new data arriving) is sent via dataRead event handler and removed
-#     take care when this method is called with enabled=true and some dataRead handler exists, all data existing in the buffer will be sent immediately
-#     take care that when event-based read mode is enabled and the first dataRead handler is added, all data existing in the buffer will also be sent immediately
-#     take care when event-based read mode is enabled, no empty/hasData/newData/lowWatermark/highWatermark/full events will be sent by the buffer
+    # enables or disables event-based read mode for the buffer
+    # when event-based read mode is enabled, all existing data from the left side of the buffer (and all new data arriving) is sent via dataRead event handler and removed
+    # take care when this method is called with enabled=true and some dataRead handler exists, all data existing in the buffer will be sent immediately
+    # take care that when event-based read mode is enabled and the first dataRead handler is added, all data existing in the buffer will also be sent immediately
+    # take care when event-based read mode is enabled, no empty/hasData/newData/lowWatermark/highWatermark/full events will be sent by the buffer
 
 # Data manipulation
 # setting silent=true means the operation will send no buffer events that may normally happen (not even event-based read mode dataRead event)
 # setting noSizeUpdate=true disables skbDataAdded()/skbDataRemoved()/skbSizeAdded()/skbSizeRemoved() calls and their events
-#   this is useful for bulk operations where buffer size may also be updated once and in bulk, but needs extra care to ensure buffer count/size matches the contents
-#   take care that using noSizeUpdate normally implies no events will be sent at all, so silent=true is implied, but it's the best to pass both as true explicitly
+  # this is useful for bulk operations where buffer size may also be updated once and in bulk, but needs extra care to ensure buffer count/size matches the contents
+  # take care that using noSizeUpdate normally implies no events will be sent at all, so silent=true is implied, but it's the best to pass both as true explicitly
 # normally the buffers are FIFO, and the left side is considered exit side while the right side is considered entry side (not mandatory)
-#   this means i.e. for read buffers socket reads data from the left side, and transport appends data to the right side of the buffer
-#   similarly for write buffers, socket appends data to the right side, and transport reads the data to transmit from the left side of the buffer
-#   all normal default buffer capabilities implementations expect buffers to behave that way (right-to-left FIFO) and so are only applicable to such
-#   normal default bulk buffer capabilities implementations tend to pass the buffer contents with foreach() which only works with the right-to-left FIFO model
+  # this means i.e. for read buffers socket reads data from the left side, and transport appends data to the right side of the buffer
+  # similarly for write buffers, socket appends data to the right side, and transport reads the data to transmit from the left side of the buffer
+  # all normal default buffer capabilities implementations expect buffers to behave that way (right-to-left FIFO) and so are only applicable to such
+  # normal default bulk buffer capabilities implementations tend to pass the buffer contents with foreach() which only works with the right-to-left FIFO model
 
 # - skbInitialize($id, $socket, $parameters)
-#     normally called from the constructor, but can also be called to reinitialize the internal buffer state i.e. after the buffer is closed/aborted
-#     initializes all internal properties, reads buffer parameters, clears data buffer and transitions to 'created' state, sends no events
+    # normally called from the constructor, but can also be called to reinitialize the internal buffer state i.e. after the buffer is closed/aborted
+    # initializes all internal properties, reads buffer parameters, clears data buffer and transitions to 'created' state, sends no events
 # - skbClear($silent = false)
-#     clears the buffer contents, also must create and initialize the data buffer if it is not yet created
-#     in the base implementation this always just creates a new SplDoublyLinkedList object as data buffer and leaves real clear to the GC
+    # clears the buffer contents, also must create and initialize the data buffer if it is not yet created
+    # in the base implementation this always just creates a new SplDoublyLinkedList object as data buffer and leaves real clear to the GC
 # - skbPopLeft($silent = false, $noSizeUpdate = false)
-#     removes and returns the data block from the left side of the buffer, invoking necessary events (if allowed) and updating buffer data count/size (if allowed)
-#     if there is no data left, returns false
-#     normally used by sockets to read data from read FIFO buffers and by transports to read data from write FIFO buffers
+    # removes and returns the data block from the left side of the buffer, invoking necessary events (if allowed) and updating buffer data count/size (if allowed)
+    # if there is no data left, returns false
+    # normally used by sockets to read data from read FIFO buffers and by transports to read data from write FIFO buffers
 # - skbPopRight($silent = false, $noSizeUpdate = false)
-#     removes and returns the data block from the right side of the buffer, invoking necessary events (if allowed) and updating buffer data count/size (if allowed)
-#     if there is no data left, returns false
-#     normally is unused in the default implementation with right-to-left FIFO buffers
+    # removes and returns the data block from the right side of the buffer, invoking necessary events (if allowed) and updating buffer data count/size (if allowed)
+    # if there is no data left, returns false
+    # normally is unused in the default implementation with right-to-left FIFO buffers
 # - skbAddLeft($data, $silent = false, $noSizeUpdate = false)
-#     adds the data block to the left side of the buffer and returns true if the operation succeeded, invoking necessary events (if allowed) and updating buffer data count/size (if allowed)
-#     in the base implementation, it is not checked and the operation is expected to always succeed
-#     normally used by both sockets and transports to return unprocessed/untransmitted data back to the read/write FIFO buffers to be read/transmitted next time
+    # adds the data block to the left side of the buffer and returns true if the operation succeeded, invoking necessary events (if allowed) and updating buffer data count/size (if allowed)
+    # in the base implementation, it is not checked and the operation is expected to always succeed
+    # normally used by both sockets and transports to return unprocessed/untransmitted data back to the read/write FIFO buffers to be read/transmitted next time
 # - skbAddRight($data, $silent = false, $noSizeUpdate = false)
-#     adds the data block to the right side of the buffer and returns true if the operation succeeded, invoking necessary events (if allowed) and updating buffer data count/size (if allowed)
-#     in the base implementation, it is not checked and the operation is expected to always succeed
-#     normally used by both transports and sockets to add new data to be read/transmitted to the read/write FIFO buffers
+    # adds the data block to the right side of the buffer and returns true if the operation succeeded, invoking necessary events (if allowed) and updating buffer data count/size (if allowed)
+    # in the base implementation, it is not checked and the operation is expected to always succeed
+    # normally used by both transports and sockets to add new data to be read/transmitted to the read/write FIFO buffers
 # - skbPeekLeft()
-#     just returns the first data block from the left side of the buffer, has no events or size updates
-#     if the buffer is empty, returns false
-#     normally used by sockets to preview/peek the data block from read buffers, used by transports to attempt to transmit the block from write buffers before updating
+    # just returns the first data block from the left side of the buffer, has no events or size updates
+    # if the buffer is empty, returns false
+    # normally used by sockets to preview/peek the data block from read buffers, used by transports to attempt to transmit the block from write buffers before updating
 # - skbPeekRight()
-#     just returns the first data block from the right side of the buffer, has no events or size updates
-#     if the buffer is empty, returns false
-#     normally is unused in the default implementation with right-to-left FIFO buffers
+    # just returns the first data block from the right side of the buffer, has no events or size updates
+    # if the buffer is empty, returns false
+    # normally is unused in the default implementation with right-to-left FIFO buffers
 
 # Socket and transport establishment
 
 # - skbSocketOpen()
-#     called by the socket side to inform transport side that buffer needs to be open and start operations
-#     transitions buffer to the 'opening' state and invokes opening event to inform the transport
+    # called by the socket side to inform transport side that buffer needs to be open and start operations
+    # transitions buffer to the 'opening' state and invokes opening event to inform the transport
 # - skbTransportOpen()
-#     called by the transport side to inform socket the transport has been initialized and buffer may start operating
-#     can be only called from 'opening' state or before it, transitions buffer to the 'open' state and invokes open event to inform the socket
+    # called by the transport side to inform socket the transport has been initialized and buffer may start operating
+    # can be only called from 'opening' state or before it, transitions buffer to the 'open' state and invokes open event to inform the socket
 # - skbSocketClose()
-#     called by the socket side to inform transport side that buffer needs to be closed (for write buffers, that involves i.e. flushing all the written data by the transport)
-#     can be only called from 'open' state, transitions buffer to 'closing' state and invokes closing event to inform the transport
+    # called by the socket side to inform transport side that buffer needs to be closed (for write buffers, that involves i.e. flushing all the written data by the transport)
+    # can be only called from 'open' state, transitions buffer to 'closing' state and invokes closing event to inform the transport
 # - skbTransportClose()
-#     called by the transport side to inform socket the buffer operations are ceased (i.e. all write data is flushed and transport write side closed)
-#     can be only called from 'open' or 'closed' state, transitions buffer to 'closed' state and invokes closed event to inform the socket
-#     take care that it may be called without socket request and directly from 'open' state, i.e. when the transport for read buffer detects 'eof' on the transport
-#     write buffer transports must never do that if there is some data to write is present in the buffer, in the case data cannot be transmitted anymore, error should be reported and skbAbort() called instead
+    # called by the transport side to inform socket the buffer operations are ceased (i.e. all write data is flushed and transport write side closed)
+    # can be only called from 'open' or 'closed' state, transitions buffer to 'closed' state and invokes closed event to inform the socket
+    # take care that it may be called without socket request and directly from 'open' state, i.e. when the transport for read buffer detects 'eof' on the transport
+    # write buffer transports must never do that if there is some data to write is present in the buffer, in the case data cannot be transmitted anymore, error should be reported and skbAbort() called instead
 # - skbAbort($silent = false)
-#     called by either socket or transport side to inform the buffer needs to immediately abort all running operations (i.e. in case of fatal errors)
-#     transitions the buffer to 'aborted' state, invokes closed event if the buffer was not yet closed at the moment of the call, and invokes aborted event afterwards
-#     take care that upon receiving aborted event, transports must immediately cease and not attempt any more operations with the buffer as all other processing is also ceased
+    # called by either socket or transport side to inform the buffer needs to immediately abort all running operations (i.e. in case of fatal errors)
+    # transitions the buffer to 'aborted' state, invokes closed event if the buffer was not yet closed at the moment of the call, and invokes aborted event afterwards
+    # take care that upon receiving aborted event, transports must immediately cease and not attempt any more operations with the buffer as all other processing is also ceased
 
 # Internal API (protected)
 # many of internal API calls are intended to be overridden by child implementations, see their base implementation for comments on that
 # setting silent=true means the operation will send no buffer events that may normally happen (not even event-based read mode dataRead event)
-#   there is no default of silent=false here to make sure the desired behavior flag is always passed explicitly
+  # there is no default of silent=false here to make sure the desired behavior flag is always passed explicitly
 
 # - skbInitializeDefaults()
-#     initializes all internal buffer parameters to their defaults
+    # initializes all internal buffer parameters to their defaults
 # - skbReadParameters($parameters)
-#     reads user-supplied buffer parameters from the parameters array and sets internal parameters accordingly
+    # reads user-supplied buffer parameters from the parameters array and sets internal parameters accordingly
 
 # - skbDataCleared($silent)
-#     invoked internally when the buffer data has been cleared by skbClear() call or otherwise
-#     normally reset buffer data count/size to zero by using skbSizeRemoved() operation that also invokes all events necessary
+    # invoked internally when the buffer data has been cleared by skbClear() call or otherwise
+    # normally reset buffer data count/size to zero by using skbSizeRemoved() operation that also invokes all events necessary
 # - skbDataRemoved($data, $silent, $operationHint = null)
-#     invoked internally when a data block is removed from the buffer, passing the data block to calculate its size for removal
-#     basically invokes skbSizeRemoved() with block count of 1 and size of the data obtained by skbGetDataSize() call
-#     data contains the data block, operationHint contains the operation type hint that may be checked by child classes monitoring it in skbSizeRemoved()
+    # invoked internally when a data block is removed from the buffer, passing the data block to calculate its size for removal
+    # basically invokes skbSizeRemoved() with block count of 1 and size of the data obtained by skbGetDataSize() call
+    # data contains the data block, operationHint contains the operation type hint that may be checked by child classes monitoring it in skbSizeRemoved()
 # - skbSizeRemoved($count, $size, $silent, $operationHint = null)
-#     invoked internally to update buffer size when some data gets removed from the buffer
-#     count contains block count that was removed, size contains data size that was removed and operationHint contains the operation type hint
-#     updates buffer data count and size accordingly, invokes lowWatermark and empty events (if permitted)
+    # invoked internally to update buffer size when some data gets removed from the buffer
+    # count contains block count that was removed, size contains data size that was removed and operationHint contains the operation type hint
+    # updates buffer data count and size accordingly, invokes lowWatermark and empty events (if permitted)
 # - skbDataAdded($data, $silent, $operationHint = null)
-#     invoked internally when a data block is added to the buffer, passing the data block to calculate its size for addition
-#     basically invokes skbSizeAdded() with block count of 1 and size of the data obtained by skbGetDataSize() call
-#     data contains the data block, operationHint contains the operation type hint that may be checked by child classes monitoring it in skbSizeAdded()
+    # invoked internally when a data block is added to the buffer, passing the data block to calculate its size for addition
+    # basically invokes skbSizeAdded() with block count of 1 and size of the data obtained by skbGetDataSize() call
+    # data contains the data block, operationHint contains the operation type hint that may be checked by child classes monitoring it in skbSizeAdded()
 # - skbSizeAdded($count, $size, $silent, $operationHint = null)
-#     invoked internally to update buffer size when some data gets added to the buffer
-#     count contains block count that was added, size contains data size that was added and operationHint contains the operation type hint
-#     updates buffer data count and size accordingly, invokes hasData, newData, highWatermark and full events (if permitted)
-#     if event-based read mode is enabled and the operation is not silent, sends all the new data to the dataRead handler, invoking no further events
+    # invoked internally to update buffer size when some data gets added to the buffer
+    # count contains block count that was added, size contains data size that was added and operationHint contains the operation type hint
+    # updates buffer data count and size accordingly, invokes hasData, newData, highWatermark and full events (if permitted)
+    # if event-based read mode is enabled and the operation is not silent, sends all the new data to the dataRead handler, invoking no further events
 # - skbGetDataSize($data)
-#     calculates and returns the data size of the data block passed, always 1 in the base implementation (block size)
-#     i.e. with byte buffer capability, overridden to do strlen() or ask for data size from ISizableByteBufferObject objects
-#     take care that this operation can return 0 for unsizable objects and elements, socket/buffer/capabilities code is adjusted for that, but the application must also be able to handle it
+    # calculates and returns the data size of the data block passed, always 1 in the base implementation (block size)
+    # i.e. with byte buffer capability, overridden to do strlen() or ask for data size from ISizableByteBufferObject objects
+    # take care that this operation can return 0 for unsizable objects and elements, socket/buffer/capabilities code is adjusted for that, but the application must also be able to handle it
 # - skbExtendMaxSize($targetSize, $targetHighWatermark = null, $silent = false)
-#     exists to be called internally (i.e. by capabilities) when there is not enough data in the buffer to satisfy the operation and maximum buffer size must be extended temporarily to allow transport side to read even more data
-#     targetSize contains target maximum buffer size to extend to, but if it is lower than current maximum size plus extendSizeBy setting, the buffer will be extended to the sum of the latter
-#     can also be used to change high watermark temporarily accordingly, if targetHighWatermark is provided, in this case if not silenced, invokes new highWatermark event if the new watermark is already reached
-#     if not silenced, invokes skbRequestMoreData() to inform transport side that more data is required to be read in
-#     normally is used in read buffers and has no clearly defined meaning for write buffers
+    # exists to be called internally (i.e. by capabilities) when there is not enough data in the buffer to satisfy the operation and maximum buffer size must be extended temporarily to allow transport side to read even more data
+    # targetSize contains target maximum buffer size to extend to, but if it is lower than current maximum size plus extendSizeBy setting, the buffer will be extended to the sum of the latter
+    # can also be used to change high watermark temporarily accordingly, if targetHighWatermark is provided, in this case if not silenced, invokes new highWatermark event if the new watermark is already reached
+    # if not silenced, invokes skbRequestMoreData() to inform transport side that more data is required to be read in
+    # normally is used in read buffers and has no clearly defined meaning for write buffers
 # - skbRequestMoreData()
-#     exists to be called internally to inform the transport that more data is needed (i.e. the buffer is empty and another read request came from application)
-#     sends pendingData event to inform transport about the condition, normally is used in read buffers and has no clearly defined meaning for write buffers
+    # exists to be called internally to inform the transport that more data is needed (i.e. the buffer is empty and another read request came from application)
+    # sends pendingData event to inform transport about the condition, normally is used in read buffers and has no clearly defined meaning for write buffers
 
 # - skbSendEventModeData()
-#     invoked internally to send all data in the buffer to the readData event when event-based read mode is enabled
-#     sends everything silently (without events) to the readData event handlers if at least one handler is defined, does nothing otherwise
+    # invoked internally to send all data in the buffer to the readData event when event-based read mode is enabled
+    # sends everything silently (without events) to the readData event handlers if at least one handler is defined, does nothing otherwise
 # - skbSendError($code, $subCode, $text, $fatal = true)
-#     invoked internally to propagate some error message to both socket and transport side
-#     sends error event, code/subCode/text contain normal error data (code must be one of the error constants, subcode and text are arbitrary if not defined elsewhere otherwise)
-#     fatal error indication, if true, usually causes further abort of the buffer/socket operations when encountered by the event handlers
+    # invoked internally to propagate some error message to both socket and transport side
+    # sends error event, code/subCode/text contain normal error data (code must be one of the error constants, subcode and text are arbitrary if not defined elsewhere otherwise)
+    # fatal error indication, if true, usually causes further abort of the buffer/socket operations when encountered by the event handlers
 
 # The standard buffer events are defined as follows
 # Event setters are lowerCamelCased on<event> calls, i.e. onReadHasData() for readHasData event, onConnecting() for connecting event, etc.
 # Take care that events must be set using class constants, as socket events are frequent and need to be optimized for performance
 
 # - hasData($buffer)
-#     invoked when some data is added to the empty buffer
-#     read buffer example: transport added new data to the buffer, socket catches the event and invokes its own hasData event
-#     write buffer example: socket added new data to the buffer, transport catches the event and pushes polling to write out the data
+    # invoked when some data is added to the empty buffer
+    # read buffer example: transport added new data to the buffer, socket catches the event and invokes its own hasData event
+    # write buffer example: socket added new data to the buffer, transport catches the event and pushes polling to write out the data
 # - newData($buffer)
-#     invoked when any data is added to the buffer
-#     read buffer example: transport added new data to the buffer, socket catches the event and invokes its own newData event
-#     write buffer example: normally there is no need to use nor handle this event for write buffers
+    # invoked when any data is added to the buffer
+    # read buffer example: transport added new data to the buffer, socket catches the event and invokes its own newData event
+    # write buffer example: normally there is no need to use nor handle this event for write buffers
 # - empty($buffer)
-#     invoked when the last piece of data is removed from the empty buffer
-#     read buffer example: socket consumed all the data in the buffer, transport catches the event and pushes polling to read more data, also handled by socket when in disconnecting state to detect when reads are flushed
-#     write buffer example: transport added new data to the buffer, socket catches the event and invokes its own writeEmpty event
+    # invoked when the last piece of data is removed from the empty buffer
+    # read buffer example: socket consumed all the data in the buffer, transport catches the event and pushes polling to read more data, also handled by socket when in disconnecting state to detect when reads are flushed
+    # write buffer example: transport added new data to the buffer, socket catches the event and invokes its own writeEmpty event
 # - lowWatermark($buffer)
-#     invoked when buffer data size falls down to or below the low watermark defined
-#     read buffer example: socket consumed enough data from the buffer, transport catches the event and pushes polling to read more data
-#     write buffer example: transport added enough data to the buffer, socket catches the event and invokes its own writeLowWatermark event
+    # invoked when buffer data size falls down to or below the low watermark defined
+    # read buffer example: socket consumed enough data from the buffer, transport catches the event and pushes polling to read more data
+    # write buffer example: transport added enough data to the buffer, socket catches the event and invokes its own writeLowWatermark event
 # - highWatermark($buffer)
-#     invoked once when buffer data size grows up to or over the high watermark defined
-#     read buffer example: transport added enough data to the buffer, socket catches the event and invokes its own readHighWatermark event
-#     write buffer example: socket added enough data to the buffer, transport catches the event and pushes polling to write out the data, socket also catches the event and invokes its own writeHighWatermark event
+    # invoked once when buffer data size grows up to or over the high watermark defined
+    # read buffer example: transport added enough data to the buffer, socket catches the event and invokes its own readHighWatermark event
+    # write buffer example: socket added enough data to the buffer, transport catches the event and pushes polling to write out the data, socket also catches the event and invokes its own writeHighWatermark event
 # - full($buffer)
-#     invoked once when buffer data size grows up to or over the maximum size defined
-#     read buffer example: transport added enough data to the buffer, socket catches the event and invokes its own readFull event, transport also catches the event and reduces amount of read polling
-#     write buffer example: socket added enough data to the buffer, transport catches the event and pushes polling to write out the data, socket also catches the event and invokes its own writeFull event
+    # invoked once when buffer data size grows up to or over the maximum size defined
+    # read buffer example: transport added enough data to the buffer, socket catches the event and invokes its own readFull event, transport also catches the event and reduces amount of read polling
+    # write buffer example: socket added enough data to the buffer, transport catches the event and pushes polling to write out the data, socket also catches the event and invokes its own writeFull event
 # - pendingData($buffer)
-#     invoked once when real maximum buffer size is extended by some operation that needs more data to be read
-#     read buffer example: socket tries to read data from the full buffer, but i.e. delimited or byte read needs more data, transport catches the event and pushes polling to read more data
-#     write buffer example: normally there is no need to use nor handle this event for write buffers
+    # invoked once when real maximum buffer size is extended by some operation that needs more data to be read
+    # read buffer example: socket tries to read data from the full buffer, but i.e. delimited or byte read needs more data, transport catches the event and pushes polling to read more data
+    # write buffer example: normally there is no need to use nor handle this event for write buffers
 # - opening($buffer)
-#     invoked when socket asks to open the buffer, designed to make complex transports open their read/write sides of the socket then confirm it to the socket
-#     read buffer example: socket requests to open the buffer, transport catches the event and starts read polling, then requests back to open the buffer
-#     write buffer example: socket requests to open the buffer, transport catches the event and starts write polling, then requests back to open the buffer
+    # invoked when socket asks to open the buffer, designed to make complex transports open their read/write sides of the socket then confirm it to the socket
+    # read buffer example: socket requests to open the buffer, transport catches the event and starts read polling, then requests back to open the buffer
+    # write buffer example: socket requests to open the buffer, transport catches the event and starts write polling, then requests back to open the buffer
 # - open($buffer)
-#     invoked when transport confirms opening the buffer, this normally happens after transport connects and starts polling on corresponding side of the socket
-#     read buffer example: transport requests to open the buffer, socket catches the event and invokes its own connected event when all buffers are open
-#     write buffer example: transport requests to open the buffer, socket catches the event and invokes its own connected event when all buffers are open
+    # invoked when transport confirms opening the buffer, this normally happens after transport connects and starts polling on corresponding side of the socket
+    # read buffer example: transport requests to open the buffer, socket catches the event and invokes its own connected event when all buffers are open
+    # write buffer example: transport requests to open the buffer, socket catches the event and invokes its own connected event when all buffers are open
 # - closing($buffer)
-#     invoked when socket asks to close the buffer, designed to provide a way for transport to reach some closure on the socket state (i.e. flush all outstanding write data) before closing corresponding side of the socket
-#     read buffer example: socket requests to close the buffer, transport catches the event and stops read polling, then closes read side of the socket (and the whole socket if both sides are closed), then requests back to close the buffer
-#     write buffer example: socket requests to close the buffer, transport catches the event and starts write flushing, socket also catches the event and invokes its own writeClosing event
-#                           when all outstanding writes are flushed, transport stops write polling, closes write side of the socket (and the whole socket if both sides are closed) and requests back to close the buffer
+    # invoked when socket asks to close the buffer, designed to provide a way for transport to reach some closure on the socket state (i.e. flush all outstanding write data) before closing corresponding side of the socket
+    # read buffer example: socket requests to close the buffer, transport catches the event and stops read polling, then closes read side of the socket (and the whole socket if both sides are closed), then requests back to close the buffer
+    # write buffer example: socket requests to close the buffer, transport catches the event and starts write flushing, socket also catches the event and invokes its own writeClosing event
+    #                       when all outstanding writes are flushed, transport stops write polling, closes write side of the socket (and the whole socket if both sides are closed) and requests back to close the buffer
 # - closed($buffer, $oldState), this normally happens after transport stops polling for and closes corresponding side of the socket
-#     invoked when transport asks to close the buffer, this normally happens after transport closed corresponding end of the socket and polling, also can be triggered by transport without notice if i.e. transport host closed some side of the socket or error happens
-#     oldState contains buffer state prior to closing to facilitate decisions based on which state the transition happened from
-#     read buffer example: transport requests to close the buffer, socket catches the event and invokes its own readClosed event, then disconnected event when all buffers are closed
-#     write buffer example: transport requests to close the buffer, socket catches the event and invokes its own writeClosed event, then disconnected event when all buffers are closed
+    # invoked when transport asks to close the buffer, this normally happens after transport closed corresponding end of the socket and polling, also can be triggered by transport without notice if i.e. transport host closed some side of the socket or error happens
+    # oldState contains buffer state prior to closing to facilitate decisions based on which state the transition happened from
+    # read buffer example: transport requests to close the buffer, socket catches the event and invokes its own readClosed event, then disconnected event when all buffers are closed
+    # write buffer example: transport requests to close the buffer, socket catches the event and invokes its own writeClosed event, then disconnected event when all buffers are closed
 # - error($buffer, $errorCode, $errorSubCode, $errorText, $fatal)
-#     this event is invoked when socket buffer encounters an error during the operations, but it exists only to provide error code/message and should not cause immediate socket aborts
-#     if the error is fatal, this event is to be accompanied with closed/abort events by using skbAbort(), normally all handled by socket side only to register buffer errors
-#     code is normally one of SKB_ERROR constants, while subcode can be i.e. operating system error code encountered, also take care the base buffer implementation provides no error messaging
+    # this event is invoked when socket buffer encounters an error during the operations, but it exists only to provide error code/message and should not cause immediate socket aborts
+    # if the error is fatal, this event is to be accompanied with closed/abort events by using skbAbort(), normally all handled by socket side only to register buffer errors
+    # code is normally one of SKB_ERROR constants, while subcode can be i.e. operating system error code encountered, also take care the base buffer implementation provides no error messaging
 # - aborted($buffer, $oldState)
-#     as this event is normally accompanied by closed events, socket side normally needs no specific handling for this event, the abort operation itself is usually error-related and so forced abort of operation on all sides is necessary
-#     oldState contains buffer state prior to aborting to facilitate decisions based on which state the transition happened from
-#     read buffer example: buffer abort is requested, transport catches the event and stops read polling, also closing the read side of the socket (and the whole socket if both sides are closed)
-#     write buffer example: buffer abort is requested, transport catches the event and stops write polling, also closing the write side of the socket (and the whole socket if both sides are closed)
+    # as this event is normally accompanied by closed events, socket side normally needs no specific handling for this event, the abort operation itself is usually error-related and so forced abort of operation on all sides is necessary
+    # oldState contains buffer state prior to aborting to facilitate decisions based on which state the transition happened from
+    # read buffer example: buffer abort is requested, transport catches the event and stops read polling, also closing the read side of the socket (and the whole socket if both sides are closed)
+    # write buffer example: buffer abort is requested, transport catches the event and stops write polling, also closing the write side of the socket (and the whole socket if both sides are closed)
 # - dataRead($buffer, $data)
-#     invoked when the buffer is operating in event read mode, sending each data block received via this event
-#     on enabling event read mode, all buffered data blocks will be sent via this event if any handler exists, otherwise the data will be left buffered
-#     on adding new handler for this event, if running handler is allowed and event read mode is enabled, all buffered data blocks will be sent via this event
+    # invoked when the buffer is operating in event read mode, sending each data block received via this event
+    # on enabling event read mode, all buffered data blocks will be sent via this event if any handler exists, otherwise the data will be left buffered
+    # on adding new handler for this event, if running handler is allowed and event read mode is enabled, all buffered data blocks will be sent via this event
 
 interface IBuffer
 {
