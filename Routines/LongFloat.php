@@ -632,25 +632,29 @@ class LongFloat
     # PI calculation (Chudnovsky, binary splitting) with current max decimals
     public function pi()
     {
-        list($p, $q, $t) = $this->piChudRound(0, ceil($this->maxDecimals / log(151931373056000, 10)) + 1); # const = 640320^3 / 24 / 72
+        $this->piChudRound(0, ceil($this->maxDecimals / log(151931373056000, 10)) + 1, $p, $q, $t); # const = 640320^3 / 24 / 72
         return $this->set(10005)->sqrt()->mul($q)->mul(426880)->div($t)->round();
     }
 
-    protected function piChudRound($a, $b)
+    protected function piChudRound($a, $b, &$p, &$q, &$t)
     {
         # uses GMP directly as these are all integer calculations
         if (($b - $a) == 1) {
-            if ($a == 0) return [1, 1, 13591409];
-            return [
-                $Pab = gmp_mul(($a6 = $a * 6) - 5, gmp_mul($a6 - 1, $a * 2 - 1)), # P(a,b) = (6 * a - 5) * (6 * a - 1) * (2 * a - 1)
-                gmp_mul(gmp_pow($a, 3), 10939058860032000), # Q(a,b) = (640320^3 / 24) * a^3
-                ($a & 1) ? gmp_mul($Pab, gmp_add(gmp_mul(-545140134, $a), -13591409)) : gmp_mul($Pab, gmp_add(gmp_mul(545140134, $a), 13591409)) # T(a,b) = +/- P(a,b) * (a * 545140134 + 13591409)
-            ];
+            if ($a == 0) {
+                $p = $q = 1;
+                $t = 13591409;
+            } else {
+                $p = gmp_mul(($a6 = $a * 6) - 5, gmp_mul($a6 - 1, $a * 2 - 1)); # P(a,b) = (6 * a - 5) * (6 * a - 1) * (2 * a - 1)
+                $q = gmp_mul(gmp_pow($a, 3), 10939058860032000); # Q(a,b) = (640320^3 / 24) * a^3
+                $t = ($a & 1) ? gmp_mul($p, gmp_add(gmp_mul(-545140134, $a), -13591409)) : gmp_mul($p, gmp_add(gmp_mul(545140134, $a), 13591409)); # T(a,b) = +/- P(a,b) * (a * 545140134 + 13591409)
+            }
         } else {
             $m = ($a + $b) >> 1;
-            list($Pam, $Qam, $Tam) = $this->piChudRound($a, $m);
-            list($Pmb, $Qmb, $Tmb) = $this->piChudRound($m, $b);
-            return [gmp_mul($Pam, $Pmb), gmp_mul($Qam, $Qmb), gmp_add(gmp_mul($Qmb, $Tam), gmp_mul($Pam, $Tmb))];
+            $this->piChudRound($a, $m, $Pam, $Qam, $Tam);
+            $this->piChudRound($m, $b, $Pmb, $Qmb, $Tmb);
+            $p = gmp_mul($Pam, $Pmb);
+            $q = gmp_mul($Qam, $Qmb);
+            $t = gmp_add(gmp_mul($Qmb, $Tam), gmp_mul($Pam, $Tmb));
         }
     }
 
