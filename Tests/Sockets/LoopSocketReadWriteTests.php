@@ -194,7 +194,7 @@ class Test
             echo(" * BULK DELIMITED (\\N/32) READ, TOTAL ".count($chunk)." LINES\n");
             foreach ($chunk as $data) $read[] = $data;
         }
-        if (($data = $socket->readBytes()) !== '') {
+        if (($data = $socket->readBytes(0x1000)) !== '') {
             echo(" * READ ".strlen($data)." BYTES\n");
             $read[] = $data;
         } else {
@@ -207,8 +207,8 @@ class Test
     {
         # LARGE BULK DELIMITED READ WITH DUAL DELIMITER, LAST LINE WILL BE JUST READ BY READBYTES AS IT HAS NO DELIMITER
         $socket->setDelimiter(["\r\n", "\n"]);
-        $read = $socket->readDelimitedBulk();
-        if (($data = $socket->readBytes()) !== '') {
+        $read = $socket->readDelimitedBulk(0x1000);
+        if (($data = $socket->readBytes(0x1000)) !== '') {
             echo(" * READ ".strlen($data)." BYTES\n");
             $read[] = $data;
         } else {
@@ -223,12 +223,12 @@ class Test
         $read = [];
         $socket->setDelimiter(["\r\n", "\n"]);
         for ($i = 1; $i < 5; $i++) {
-            if (!empty($chunk = $socket->readDelimitedBulk(PHP_INT_MAX, PHP_INT_MAX, true, true))) {
+            if (!empty($chunk = $socket->readDelimitedBulk(0x1000, PHP_INT_MAX, true, true))) {
                 echo(" * BULK DELIMITED READ {$i}, TOTAL ".count($chunk)." LINES\n");
                 foreach ($chunk as $data) $read[] = $data;
             }
         }
-        if (($data = $socket->readBytes()) !== '') {
+        if (($data = $socket->readBytes(0x1000)) !== '') {
             echo(" * READ ".strlen($data)." BYTES\n");
             $read[] = $data;
         } else {

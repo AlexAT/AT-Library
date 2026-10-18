@@ -23,7 +23,7 @@ namespace ATL\Sockets;
 # BufferBaseWriteCapability
   # applicability: write buffers
 # Public API:
-# - write()
+# - write($data)
     # places one data block to the buffer right side, returns true if operation succeeded, false otherwise
     # false normally means the buffer is not writeable (anymore) - i.e. not yet open or already closed
 
@@ -130,7 +130,7 @@ namespace ATL\Sockets;
 # There are also some indicative capabilities that do not provide any extensions to the buffer but are informative about the buffer type
 
 # BufferMessageCapability
-  # indicates the buffer does only contains inseparable messages (any scalars or objects or whatever) that cannot be read, sent or processed in parts
+  # indicates the buffer does only contains indivisible messages (any scalars or objects or whatever) that cannot be read, sent or processed in parts
   # the messages can be byte-sized or non-sizeable, but this kind of buffer only handles whole messages and does not do any assumptions about their contents
 # BufferDatagramCapability
   # indicates the buffer contains byte-sized datagrams (strings or stringable objects) that are intended to be read, sent or processed as whole and not in parts
@@ -440,15 +440,15 @@ trait TBufferBulkStringReadCapability
 
 interface IBufferByteReadCapability extends IBufferBaseReadCapability, IBufferByteSizeCapability, IBufferBulkReadCapability
 {
-    public function readBytes($count = PHP_INT_MAX, $exact = false, $throwOnImpossibleRead = false); # reads up to or exactly count bytes from the buffer, returns empty string if there is nothing to read or not enough bytes to read (socket side)
-    public function readBytesBulk($count = PHP_INT_MAX, $maxReadCount = PHP_INT_MAX, $exact = false, $throwOnImpossibleRead = false); # reads up to maxReadCount strings in the same flavor readBytes() does, last read depends on exact setting (socket side)
+    public function readBytes($count, $exact = false, $throwOnImpossibleRead = false); # reads up to or exactly count bytes from the buffer, returns empty string if there is nothing to read or not enough bytes to read (socket side)
+    public function readBytesBulk($count, $maxReadCount = PHP_INT_MAX, $exact = false, $throwOnImpossibleRead = false); # reads up to maxReadCount strings in the same flavor readBytes() does, last read depends on exact setting (socket side)
 
     # protected function readBytesBulkInternal($count = PHP_INT_MAX, $maxReadCount = PHP_INT_MAX, $exact = false, $throwOnImpossibleRead = false, $forceArray = false)
 }
 
 trait TBufferByteReadCapability
 {
-    public function readBytes($count = PHP_INT_MAX, $exact = false, $throwOnImpossibleRead = false)
+    public function readBytes($count, $exact = false, $throwOnImpossibleRead = false)
     {
         if ($count <= 0) return ''; # requested nothing to read, return empty string
 
@@ -605,7 +605,7 @@ interface IBufferDelimitedReadCapability extends IBufferBaseReadCapability, IBuf
     const SKB_SIZE_OPERATION_POP_LEFT_DELIMITED_READ_REMOVAL = 0x100; # additional operation hint code to indicate removing data that does not affect our own scan operation
     const SKB_SIZE_OPERATION_ADD_LEFT_DELIMITED_READ_REMAINDER = 0x0101; # additional operation hint code to indicate adding data remainder that does not affect our own scan operations
 
-    public function setDelimiter($delimiter); # sets the delimiter to split delimited reads from the buffer by (socket side)
+    public function setDelimiter($delimiter, $caseInsensitive = false); # sets the delimiter to split delimited reads from the buffer by (socket side)
     public function readDelimited($maxLineLength, $strict = true, $throwOnImpossibleRead = false); # reads next string up to delimiter or maxLineLength bytes, the delimiter is also returned in result if encountered (socket side)
     public function readDelimitedBulk($maxLineLength, $maxReadCount = PHP_INT_MAX, $strict = true, $stopOnEmptyLine = false, $throwOnImpossibleRead = false); # reads up to maxReadCount strings in the same flavor readDelimited() does (socket side)
 
