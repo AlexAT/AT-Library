@@ -690,7 +690,7 @@ trait TTaskLoop
 
     public static function getDefaultTaskLoop(/** @var \ATL\Task[] */ ...$tasks)
     {
-        $taskLoop = \ATL\ObjectRegistry::getInstance('\\ATL\\Default\\TaskLoop', false, static::class);
+        $taskLoop = \ATL\ObjectRegistry::getInstance('\\ATL\\Default\\'.static::class, false, static::class);
         if (!empty($tasks)) $taskLoop->addTasks(...$tasks);
         return $taskLoop;
     }

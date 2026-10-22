@@ -77,12 +77,14 @@ trait TEventHandlers
         if ($owner !== null) {
             if (is_object($owner)) $owner = spl_object_id($owner);
             if ($handlerNames === null) {
-                foreach ($this->ehEventHandlers as $handler => $callbacks) {
-                    if (isset($callbacks[$owner])) {
-                        unset($this->ehEventHandlers[$handler][$owner]);
-                        if (empty($this->ehEventHandlers[$handler])) unset($this->ehEventHandlers[$handler]); # remove empty handler set
-                        $this->ehOnEventHandlerRemove($owner, $handler);
-                    }
+                $removeHandlers = []; # we avoid copying foreach source there, it is generally slower than building a new smaller array
+                foreach ($this->ehEventHandlers as $handler => $callbacks)
+                    if (isset($callbacks[$owner]))
+                        $removeHandlers[] = $handler;
+                foreach ($removeHandlers as $handler) {
+                    unset($this->ehEventHandlers[$handler][$owner]);
+                    if (empty($this->ehEventHandlers[$handler])) unset($this->ehEventHandlers[$handler]); # remove empty handler set
+                    $this->ehOnEventHandlerRemove($owner, $handler);
                 }
             } else {
                 foreach (is_array($handlerNames) ? $handlerNames : [$handlerNames] as $handler) {
@@ -95,19 +97,21 @@ trait TEventHandlers
             }
         } else {
             if ($handlerNames === null) {
-                foreach ($this->ehEventHandlers as $handler => $callbacks) {
+                $removeHandlers = $this->ehEventHandlers; # again, copying foreach source is generally slower
+                foreach ($removeHandlers as $handler => $callbacks) {
                     foreach ($callbacks as $owner => $callback) {
                         unset($this->ehEventHandlers[$handler][$owner]);
-                        if (empty($this->ehEventHandlers[$handler])) unset($this->ehEventHandlers[$handler]); # remove empty handler set
+                        if (empty($this->ehEventHandlers[$handler])) unset($this->ehEventHandlers[$handler]); # remove empty handler set, it is inside loop to keep array state consistent
                         $this->ehOnEventHandlerRemove($owner, $handler);
                     }
                 }
             } else {
                 foreach (is_array($handlerNames) ? $handlerNames : [$handlerNames] as $handler) {
                     if (isset($this->ehEventHandlers[$handler])) {
-                        foreach($this->ehEventHandlers[$handler] as $owner => $callback) {
+                        $removeHandlers = $this->ehEventHandlers[$handler]; # and again, avoid copying foreach source
+                        foreach($removeHandlers as $owner => $callback) {
                             unset($this->ehEventHandlers[$handler][$owner]);
-                            if (empty($this->ehEventHandlers[$handler])) unset($this->ehEventHandlers[$handler]); # remove empty handler set
+                            if (empty($this->ehEventHandlers[$handler])) unset($this->ehEventHandlers[$handler]); # remove empty handler set, it is inside loop to keep array state consistent
                             $this->ehOnEventHandlerRemove($owner, $handler);
                         }
                     }
